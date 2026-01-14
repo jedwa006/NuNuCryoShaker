@@ -12,6 +12,12 @@ This folder contains the transport, protocol, safety, UX, and implementation doc
 7. [Command Catalog & Protocol Reference](./90-command-catalog.md)
 8. [Safety + Heartbeat (Lease) Policies](./40-safety-heartbeat-and-policies.md)
 
+## Hardware (read next)
+- [05-hardware-overview.md](05-hardware-overview.md)
+- [06-hardware-tablet-lenovo-tab-plus.md](06-hardware-tablet-lenovo-tab-plus.md)
+- [07-hardware-controller-waveshare-esp32-s3-eth-8di-8ro.md](07-hardware-controller-waveshare-esp32-s3-eth-8di-8ro.md)
+- [08-hardware-pid-lc108-stub.md](08-hardware-pid-lc108-stub.md)
+
 ## Implementation guidance
 - [Implementation Checklist (ESP + App gates)](./95-implementation-checklist.md)
 - [State Machines (App + ESP)](./96-state-machine.md)
