@@ -17,6 +17,7 @@ This folder contains the transport, protocol, safety, UX, and implementation doc
 - [State Machines (App + ESP)](./96-state-machine.md)
 - [Action → Expected Behavior → Troubleshooting Map](./97-action-behavior-troubleshooting-map.md)
 - [Operator UX Requirements (Tablet HMI)](./98-operator-ux-requirements.md)
+- [Debug & Diagnostics Access (App + Firmware)](./63-debug-and-diagnostics-access.md)
 - [Debugging & Test Plan](./60-debugging-and-test-plan.md)
 - [RS-485 Polling Strategy (3 controllers @ 9600 8N1)](./70-rs485-polling-strategy.md)
 
