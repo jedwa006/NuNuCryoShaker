@@ -6,6 +6,18 @@ For the broader 3-step audit process, see `firmware/docs/FIRMWARE_AUDIT_PLAN.md`
 
 ## Current redundancy (inventory)
 
+- **Module inventory (current)**
+  - `apps/main_app/main/app_main.c`
+    - BOOT long-press watcher task (`boot_button_task`) that notifies boot control.
+    - Boot control task (`bootctl_task`) that stores the return label and switches to
+      factory recovery.
+    - Rollback/health marking via `esp_ota_mark_app_valid_cancel_rollback()`.
+  - `apps/recovery_factory/main/ota_portal.c`
+    - SoftAP bring-up + HTTP server endpoints (`/`, `/status`, `/stage`, `/activate`,
+      `/reboot_back`).
+    - OTA staging with SHA256 verification and slot size guardrails.
+    - Return label lookup in NVS for reboot-back behavior.
+
 - **Boot control NVS access**: `bootctl` namespace and `return_lbl` key exist in both apps.
 - **NVS init boilerplate**: identical init/erase flow in both apps.
 - **Logging conventions**: tags differ (`main_app`, `ota_portal`) but no shared format/levels.
