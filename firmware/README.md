@@ -87,4 +87,5 @@ Hardening options (future work):
 ## References
 
 - System docs: `/docs/README.md`
+- Firmware audit plan: `/firmware/docs/FIRMWARE_AUDIT_PLAN.md`
 - Architecture overview: `/ARCHITECTURE.md`

@@ -2,6 +2,7 @@
 
 This plan inventories redundancy between the two ESP-IDF projects and proposes
 incremental, low-risk improvements without altering the current recovery + OTA behavior.
+For the broader 3-step audit process, see `firmware/docs/FIRMWARE_AUDIT_PLAN.md`.
 
 ## Current redundancy (inventory)
 
