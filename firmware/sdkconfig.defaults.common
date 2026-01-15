@@ -9,11 +9,41 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_ESPTOOLPY_FLASH_MODE_AUTO_DETECT=n
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
-
-# Strongly recommended to be explicit; otherwise you may inherit a default
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
 # PSRAM: Octal @ 80 MHz
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
+
+# --------------------------------------------------------------------
+# Console I/O over USB-Serial-JTAG (ESP32-S3)
+# --------------------------------------------------------------------
+
+# Keep the USB-Serial-JTAG peripheral enabled (default is enabled, but we pin it)
+CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=y
+
+# Primary console over USB Serial/JTAG Controller (CDC/ACM endpoint)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Optional: if you later enable power management/light sleep and notice USB console
+# instability while connected, this prevents auto light-sleep while the port is connected.
+# CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+
+# --------------------------------------------------------------------
+# FUTURE OPTION (GPIO UART console) — leave commented for now
+#
+# To switch from USB-Serial-JTAG to GPIO UART pins:
+#   1) Comment out: CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+#   2) Uncomment the block below
+#
+# Notes:
+# - "Custom UART" console lets you choose UART0/1 and set GPIO pins.
+# - Defaults shown here match what you saw in logs: TX=GPIO43, RX=GPIO44.
+# --------------------------------------------------------------------
+
+# CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+# CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y     # UART0 (or set _NUM_1 for UART1)
+# CONFIG_ESP_CONSOLE_UART_TX_GPIO=43
+# CONFIG_ESP_CONSOLE_UART_RX_GPIO=44
+# CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200

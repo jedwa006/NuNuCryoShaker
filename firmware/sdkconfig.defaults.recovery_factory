@@ -1,2 +1,4 @@
 # Recovery factory app: keep minimal and stable
-# (Add only what you truly need for SoftAP + HTTP OTA portal)
+
+# CONFIG_BT_ENABLED is not set
+# CONFIG_BT_NIMBLE_ENABLED is not set
