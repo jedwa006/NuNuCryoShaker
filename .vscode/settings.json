@@ -2,5 +2,8 @@
     "idf.currentSetup": "/Users/joshuaedwards/.espressif/v5.5.2/esp-idf",
     "idf.openOcdConfigs": [
         "board/esp32s3-builtin.cfg"
-    ]
+    ],
+    "idf.port": "/dev/tty.usbmodem1101",
+    "cmake.configureOnOpen": false,
+    "cmake.sourceDirectory": null
 }

@@ -5,11 +5,10 @@ set(SDKCONFIG_DEFAULTS
     "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.defaults.recovery_factory"
 )
 
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-
-idf_build_set_property(PARTITION_TABLE_FILENAME
+set(PARTITION_TABLE_FILENAME
     "${CMAKE_CURRENT_LIST_DIR}/../../partitions/partitions_16mb_recovery_ota.csv"
-    REPLACE)
-idf_build_set_property(PARTITION_TABLE_OFFSET 0x8000 REPLACE)
+)
+set(PARTITION_TABLE_OFFSET 0x8000)
 
-project(recovery_factory)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(recovery)

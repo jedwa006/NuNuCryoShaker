@@ -16,6 +16,13 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 
+# Partition table (shared; path is relative to each project root)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../partitions/partitions_16mb_recovery_ota.csv"
+# Optional but OK to pin explicitly (default is 0x8000):
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+
 # --------------------------------------------------------------------
 # Console I/O over USB-Serial-JTAG (ESP32-S3)
 # --------------------------------------------------------------------

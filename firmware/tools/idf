@@ -2,17 +2,62 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ESP_IDF_DIR="/Users/joshuaedwards/.espressif/v5.5.2/esp-idf"
+ESP_IDF_DIR="${ESP_IDF_DIR:-/Users/joshuaedwards/.espressif/v5.5.2/esp-idf}"
+
+# Optional local overrides (recommended): set ESPPORT here
+# Example: firmware/tools/local.env
+#   ESPPORT=/dev/cu.usbmodem2101
+#   ESPBAUD=115200
+if [[ -f "$ROOT/tools/local.env" ]]; then
+  # shellcheck disable=SC1090
+  source "$ROOT/tools/local.env"
+fi
 
 APP="${1:-}"
 CMD="${2:-}"
 shift 2 || true
 
+usage() {
+  cat <<EOF
+Usage:
+  $0 {main|recovery} <command> [args...]
+
+Core commands (pass-through to idf.py):
+  build | flash | monitor | menuconfig | fullclean | clean | reconfigure
+
+Extra wrapper commands:
+  reconfigure        => fullclean + reconfigure (forces sdkconfig regen from defaults)
+  erase-flash        => idf.py erase-flash
+  install-ota0       => write main_app.bin into ota_0 via parttool (SAFE: does not overwrite factory)
+  install-ota1       => write main_app.bin into ota_1 via parttool (SAFE: does not overwrite factory)
+
+Port selection:
+  - Set ESPPORT in tools/local.env (recommended), OR
+  - Pass -p /dev/... as an arg to commands (works for idf.py; wrapper also reads it for parttool)
+
+Examples:
+  $0 recovery reconfigure
+  $0 recovery erase-flash
+  $0 recovery flash
+  $0 recovery monitor
+
+  $0 main reconfigure
+  $0 main build
+  $0 main install-ota0
+EOF
+}
+
 case "$APP" in
-  main)     PROJ="$ROOT/apps/main_app" ;;
-  recovery) PROJ="$ROOT/apps/recovery_factory" ;;
+  main)
+    PROJ="$ROOT/apps/main_app"
+    PROJ_NAME="main_app"
+    ;;
+  recovery)
+    PROJ="$ROOT/apps/recovery_factory"
+    PROJ_NAME="recovery_factory"
+    ;;
   *)
-    echo "Usage: $0 {main|recovery} {build|flash|menuconfig|monitor|fullclean|clean} [args...]"
+    usage
     exit 2
     ;;
 esac
@@ -27,4 +72,101 @@ if ! command -v idf.py >/dev/null 2>&1; then
   source "${ESP_IDF_DIR}/export.sh"
 fi
 
-exec idf.py -C "$PROJ" "$CMD" "$@"
+# Parse port from args (so wrapper can reuse it for parttool)
+PORT_FROM_ARGS=""
+for ((i=1; i<=$#; i++)); do
+  arg="${!i}"
+  case "$arg" in
+    -p|--port)
+      j=$((i+1))
+      PORT_FROM_ARGS="${!j:-}"
+      ;;
+    --port=*)
+      PORT_FROM_ARGS="${arg#*=}"
+      ;;
+  esac
+done
+
+PORT="${PORT_FROM_ARGS:-${ESPPORT:-}}"
+BAUD="${ESPBAUD:-115200}"
+
+require_port() {
+  if [[ -z "${PORT:-}" ]]; then
+    echo "ERROR: No serial port specified."
+    echo "  - Set ESPPORT in $ROOT/tools/local.env, OR"
+    echo "  - Pass -p /dev/cu.usbmodem1101"
+    exit 2
+  fi
+}
+
+# Helper: path to parttool
+PARTTOOL_PY="${IDF_PATH}/components/partition_table/parttool.py"
+if [[ ! -f "$PARTTOOL_PY" ]]; then
+  echo "ERROR: parttool.py not found at: $PARTTOOL_PY"
+  echo "Check that IDF_PATH is set correctly by export.sh"
+  exit 2
+fi
+
+case "$CMD" in
+  reconfigure)
+    # Force sdkconfig regen from sdkconfig.defaults.* (fixes console selection drift)
+    idf.py -C "$PROJ" fullclean "$@"
+    idf.py -C "$PROJ" reconfigure "$@"
+    ;;
+
+  erase-flash|erase_flash)
+    require_port
+    idf.py -C "$PROJ" -p "$PORT" erase-flash "$@"
+    ;;
+
+  monitor)
+    require_port
+    idf.py -C "$PROJ" -p "$PORT" -b "$BAUD" monitor "$@"
+    ;;
+
+  flash)
+    require_port
+    idf.py -C "$PROJ" -p "$PORT" flash "$@"
+    ;;
+
+  install-ota0|install-ota1)
+    # Safety: only meaningful for main app; prevent accidental recovery overwrite patterns.
+    if [[ "$APP" != "main" ]]; then
+      echo "ERROR: $CMD is only supported for APP=main"
+      exit 2
+    fi
+    require_port
+
+    # Ensure build output exists
+    if [[ ! -f "$PROJ/build/${PROJ_NAME}.bin" ]]; then
+      echo "INFO: $PROJ/build/${PROJ_NAME}.bin not found; building first..."
+      idf.py -C "$PROJ" build
+    fi
+
+    BIN="$PROJ/build/${PROJ_NAME}.bin"
+    if [[ ! -f "$BIN" ]]; then
+      echo "ERROR: Expected app binary not found: $BIN"
+      exit 2
+    fi
+
+    PART_NAME="${CMD#install-}"  # ota0 -> ota0? we want ota_0 / ota_1
+    case "$PART_NAME" in
+      ota0) PART_NAME="ota_0" ;;
+      ota1) PART_NAME="ota_1" ;;
+      *) echo "ERROR: Unexpected install target: $PART_NAME"; exit 2 ;;
+    esac
+
+    echo "INFO: Writing $BIN to partition $PART_NAME on $PORT"
+    python "$PARTTOOL_PY" \
+      --port "$PORT" \
+      write_partition \
+      --partition-name="$PART_NAME" \
+      --input "$BIN"
+    echo "INFO: Done."
+    ;;
+
+  *)
+    # Default passthrough to idf.py
+    idf.py -C "$PROJ" "$CMD" "$@"
+    ;;
+esac
