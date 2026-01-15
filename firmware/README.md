@@ -61,6 +61,10 @@ The recovery portal hosts a local OTA UI and API. The high-level flow is:
 
 This portal explicitly avoids touching the factory partition, so recovery remains available.
 
+## Security note (recovery OTA portal defaults)
+
+The recovery portal ships with static token and AP credentials intended only as local-maintenance placeholders. These constants live in `firmware/apps/recovery_factory/main/ota_portal.c` (see the token/AP SSID and password definitions near the portal config). For production deployments, replace them with hardened options such as unique per-device tokens, rotating WPA2-PSK credentials, disabling the captive portal/UI once provisioning is complete, and/or placing the portal behind a TLS-terminating proxy to avoid exposing plaintext endpoints.
+
 ## Main app workflow
 
 - On boot, the main app calls `esp_ota_mark_app_valid_cancel_rollback()` to mark the OTA image as valid when rollback is enabled.
