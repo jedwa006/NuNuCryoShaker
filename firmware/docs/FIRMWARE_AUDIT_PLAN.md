@@ -4,6 +4,9 @@ This plan organizes the firmware cleanup effort into three explicit phases so we
 trace decisions and preserve the working recovery + OTA behavior while preparing for
 production firmware implementation.
 
+For day-to-day execution (cleanup, linting, refactors, documentation), use
+`firmware/docs/FIRMWARE_MAINTENANCE_WORKFLOW.md` as the step-by-step checklist.
+
 ## Step 1 — Analysis (inventory + constraints)
 
 **Goal:** Build a shared understanding of the current firmware state, invariants, and

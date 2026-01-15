@@ -49,3 +49,15 @@
   - `./firmware/tools/idf recovery build` (failed: ESP-IDF export.sh not found at /Users/joshuaedwards/.espressif/v5.5.2/esp-idf/export.sh)
   - `./firmware/tools/idf main build` (failed: ESP-IDF export.sh not found at /Users/joshuaedwards/.espressif/v5.5.2/esp-idf/export.sh)
 - Behavioral verification notes: Builds not run due to missing ESP-IDF in environment.
+
+## 2026-01-15T23:24:56Z (branch: work)
+- Files changed: firmware/docs/FIRMWARE_MAINTENANCE_WORKFLOW.md; firmware/docs/FIRMWARE_AUDIT_PLAN.md; firmware/docs/AGENT_LOG.md
+- Commands run:
+  - `date -u +%Y-%m-%dT%H:%M:%SZ`
+- Behavioral verification notes: Documentation-only change; no firmware builds run.
+
+## 2026-01-15T23:28:41Z (branch: work)
+- Files changed: firmware/docs/FIRMWARE_MAINTENANCE_WORKFLOW.md; firmware/docs/REFRACTOR_PLAN.md; firmware/docs/AGENT_LOG.md
+- Commands run:
+  - `date -u +%Y-%m-%dT%H:%M:%SZ`
+- Behavioral verification notes: Documentation-only change; no firmware builds run.
