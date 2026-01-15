@@ -1,77 +1,91 @@
-# Firmware
+# Firmware Bring-up & OTA Workflow
 
-This directory contains two ESP-IDF projects:
+This repository contains two ESP-IDF projects under `firmware/apps` that share a common
+partition table and configuration defaults. The recovery + OTA flow is working today and
+**must remain stable**; the guidance below documents how to build, deploy, and verify it.
 
-- `apps/recovery_factory`: the factory recovery/OTA portal image that stays in the factory slot.
-- `apps/main_app`: the normal application image that runs from OTA slots.
+## Projects
 
-For broader system context and hardware notes, see the top-level [`/docs`](../docs) directory.
+- **`recovery_factory`** (`firmware/apps/recovery_factory`)
+  - Factory recovery image that exposes a SoftAP + OTA portal for staging/activating firmware.
+- **`main_app`** (`firmware/apps/main_app`)
+  - Main firmware that runs in OTA slots (`ota_0`, `ota_1`) and can escape to recovery via
+    BOOT long-press.
 
-## Build + flash with `./firmware/tools/idf`
+## Build (deterministic wrapper)
 
-Use the wrapper script so ESP-IDF setup, partition tooling, and serial defaults are consistent.
-
-### Recovery (factory) project
+All builds should go through the wrapper so the sdkconfig defaults layering and partition
+settings stay deterministic:
 
 ```bash
+# Recovery factory image
 ./firmware/tools/idf recovery build
-./firmware/tools/idf recovery flash -p /dev/ttyUSB0
-./firmware/tools/idf recovery monitor -p /dev/ttyUSB0
-```
 
-### Main app project
-
-```bash
+# Main application image
 ./firmware/tools/idf main build
-./firmware/tools/idf main flash -p /dev/ttyUSB0
-./firmware/tools/idf main monitor -p /dev/ttyUSB0
 ```
 
-### Helpful wrapper commands
+If you need to fully regenerate `sdkconfig` from defaults (to avoid drift):
 
 ```bash
-# Force sdkconfig regeneration from defaults (handy after changing console options)
 ./firmware/tools/idf recovery reconfigure
 ./firmware/tools/idf main reconfigure
-
-# Install the main app into a specific OTA slot (uses parttool under the hood)
-./firmware/tools/idf main install-ota0 -p /dev/ttyUSB0
-./firmware/tools/idf main install-ota1 -p /dev/ttyUSB0
 ```
 
-The wrapper can read `ESPPORT` and `ESPBAUD` from `firmware/tools/local.env`, or you can pass `-p` directly to each command. The OTA installers (`install-ota0`/`install-ota1`) use `parttool.py` and never overwrite the factory recovery partition.
+### Partition table intent
 
-## Partition map intent
+Partition table: `firmware/partitions/partitions_16mb_recovery_ota.csv`
 
-The custom partition table is designed for recovery-first OTA workflows:
+- `factory` is the recovery/OTA portal (kept stable and never overwritten by OTA).
+- `ota_0` and `ota_1` are the main firmware slots.
+- `storage` is a persistent filesystem for settings/logs/assets.
 
-- **factory**: stable recovery image (the OTA portal).
-- **ota_0 / ota_1**: primary application slots for staged OTA updates.
-- **storage**: LittleFS data partition for settings/logs/assets.
+Both projects pin the same partition table in their `CMakeLists.txt` and in
+`sdkconfig.defaults.common` to avoid drift.
 
-See `firmware/partitions/partitions_16mb_recovery_ota.csv` for the exact layout.
+## OTA portal workflow (recovery_factory)
 
-## OTA portal workflow (recovery image)
+1. Connect to the SoftAP (`ESP32S3-RECOVERY`) and open `http://192.168.4.1/`.
+2. **Stage**: Upload a firmware `.bin` to write into the next OTA slot.
+3. **Status**: Use `/status` to confirm slot name, size, and SHA256.
+4. **Activate**: Switches the boot partition to the staged slot and reboots.
 
-The recovery portal hosts a local OTA UI and API. The high-level flow is:
+The portal **never** writes over the factory/recovery partition.
 
-1. **Stage**: Upload a `.bin` to `/stage`, which writes the image into the next OTA slot without switching boot partitions.
-2. **Status**: Query `/status` to confirm which slot is staged and how much was written.
-3. **Activate**: Call `/activate` to switch the boot partition to the staged slot and reboot.
+## Main app workflow (ota slots)
 
-This portal explicitly avoids touching the factory partition, so recovery remains available.
+- On boot, the main app calls `esp_ota_mark_app_valid_cancel_rollback()` to confirm the
+  OTA slot is healthy (rollback-enabled flow).
+- **BOOT long-press** (GPIO0, active-low) triggers a switch to the `factory` partition and
+  reboots into recovery.
+- The recovery portal can reboot back to the previous slot if the return label was stored
+  in NVS.
 
-## Security note (recovery OTA portal defaults)
+> Note: A commented stub remains in `main_app` for a future dedicated GPIO. Do not change
+> the BOOT long-press behavior without explicit approval.
 
-The recovery portal ships with static token and AP credentials intended only as local-maintenance placeholders. These constants live in `firmware/apps/recovery_factory/main/ota_portal.c` (see the token/AP SSID and password definitions near the portal config). For production deployments, replace them with hardened options such as unique per-device tokens, rotating WPA2-PSK credentials, disabling the captive portal/UI once provisioning is complete, and/or placing the portal behind a TLS-terminating proxy to avoid exposing plaintext endpoints.
+## Security posture (current vs. hardened)
 
-## Main app workflow
+The OTA portal uses a **static token** (`OTA_TOKEN`) and static AP credentials
+(`OTA_AP_SSID`, `OTA_AP_PASS`) in `recovery_factory/main/ota_portal.c`. This is a
+local-maintenance placeholder and **not** hardened for production.
 
-- On boot, the main app calls `esp_ota_mark_app_valid_cancel_rollback()` to mark the OTA image as valid when rollback is enabled.
-- A long-press of the **BOOT** button (GPIO0, active-low) triggers a switch back to the factory recovery partition.
+Hardening options (future work):
+- Per-device tokens stored in NVS/secure storage.
+- Rotate or disable the recovery AP in production.
+- Add TLS via a local proxy or a secure provisioning channel.
 
-## Common gotchas
+## Gotchas & tips
 
-- **NVS “no free pages”**: both images handle `ESP_ERR_NVS_NO_FREE_PAGES` by erasing and reinitializing NVS, but if you see it during bring-up, expect a full NVS erase on next boot.
-- **Serial console selection**: use `./firmware/tools/idf <app> reconfigure` to regenerate `sdkconfig` from defaults if console or UART settings drift.
-- **Parttool usage**: `install-ota0`/`install-ota1` are the safe path for programming OTA slots without overwriting factory recovery; they require a serial port (`-p` or `ESPPORT`).
+- **NVS “no free pages”**: If you see `ESP_ERR_NVS_NO_FREE_PAGES`, erase NVS or use
+  `reconfigure` to regenerate configs and flash cleanly.
+- **Console selection**: Defaults use USB-Serial-JTAG (see `sdkconfig.defaults.common`).
+  If you need GPIO UART, follow the commented block in that file.
+- **Parttool usage**: `./firmware/tools/idf main install-ota0` or `install-ota1` writes
+  the built `main_app.bin` directly to OTA slots without touching factory.
+
+## References
+
+- System docs: `/docs/README.md`
+- Firmware audit plan: `/firmware/docs/FIRMWARE_AUDIT_PLAN.md`
+- Architecture overview: `/ARCHITECTURE.md`

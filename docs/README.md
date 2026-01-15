@@ -27,6 +27,10 @@ This folder contains the transport, protocol, safety, UX, and implementation doc
 - [Debugging & Test Plan](./60-debugging-and-test-plan.md)
 - [RS-485 Polling Strategy (3 controllers @ 9600 8N1)](./70-rs485-polling-strategy.md)
 
+## Firmware bring-up + OTA
+- Firmware workflow and OTA portal: [`/firmware/README.md`](../firmware/README.md)
+- Firmware audit plan: [`/firmware/docs/FIRMWARE_AUDIT_PLAN.md`](../firmware/docs/FIRMWARE_AUDIT_PLAN.md)
+
 ## App implementation paths
 - [Kotlin (Native Android) App Architecture](./50-app-architecture-kotlin.md)
 - [Flutter App Architecture](./51-app-architecture-flutter.md)
