@@ -1,0 +1,4 @@
+# Recovery factory app: keep minimal and stable
+
+# CONFIG_BT_ENABLED is not set
+# CONFIG_BT_NIMBLE_ENABLED is not set
