@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ESP_IDF_DIR="/Users/joshuaedwards/.espressif/v5.5.2/esp-idf"
+
+APP="${1:-}"
+CMD="${2:-}"
+shift 2 || true
+
+case "$APP" in
+  main)     PROJ="$ROOT/apps/main_app" ;;
+  recovery) PROJ="$ROOT/apps/recovery_factory" ;;
+  *)
+    echo "Usage: $0 {main|recovery} {build|flash|menuconfig|monitor|fullclean|clean} [args...]"
+    exit 2
+    ;;
+esac
+
+# Activate ESP-IDF environment if idf.py isn't already in PATH
+if ! command -v idf.py >/dev/null 2>&1; then
+  if [[ ! -f "${ESP_IDF_DIR}/export.sh" ]]; then
+    echo "ERROR: ESP-IDF export.sh not found at: ${ESP_IDF_DIR}/export.sh"
+    exit 2
+  fi
+  # shellcheck disable=SC1090
+  source "${ESP_IDF_DIR}/export.sh"
+fi
+
+exec idf.py -C "$PROJ" "$CMD" "$@"

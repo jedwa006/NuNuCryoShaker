@@ -1,1 +1,7 @@
 .DS_Store
+firmware/apps/main_app/.clangd
+/firmware/apps/main_app/.devcontainer
+/firmware/apps/main_app/.vscode
+firmware/apps/recovery_factory/.clangd
+firmware/apps/recovery_factory/.devcontainer/Dockerfile
+/firmware/apps/recovery_factory/.vscode

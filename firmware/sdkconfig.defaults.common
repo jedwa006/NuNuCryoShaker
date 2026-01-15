@@ -1,0 +1,19 @@
+# Common baseline for all apps on ESP32-S3-WROOM-N16R8 (16MB flash, 8MB Octal PSRAM)
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# Boot safety (recommended for installed controllers)
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Flash: lock to known-good settings (avoid AUTO when you care about determinism)
+CONFIG_ESPTOOLPY_FLASH_MODE_AUTO_DETECT=n
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Strongly recommended to be explicit; otherwise you may inherit a default
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# PSRAM: Octal @ 80 MHz
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
