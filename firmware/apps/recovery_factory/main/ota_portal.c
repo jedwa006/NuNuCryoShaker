@@ -430,7 +430,12 @@ static esp_err_t reboot_back_post_handler(httpd_req_t *req)
         return send_text(req, "Stored return partition not found\n");
     }
 
-    ESP_ERROR_CHECK(esp_ota_set_boot_partition(p));
+    esp_err_t err = esp_ota_set_boot_partition(p);
+    if (err != ESP_OK) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return send_text(req, "esp_ota_set_boot_partition failed\n");
+    }
+
     httpd_resp_sendstr(req, "OK. Rebooting back...\n");
     vTaskDelay(pdMS_TO_TICKS(250));
     esp_restart();
