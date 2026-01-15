@@ -1,0 +1,25 @@
+name: firmware-build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.2
+    env:
+      ESP_IDF_DIR: /opt/esp/idf
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build recovery_factory
+        run: ./firmware/tools/idf recovery build
+
+      - name: Build main_app
+        run: ./firmware/tools/idf main build
+
+      - name: Check main_app size
+        run: python3 firmware/tools/check_app_size.py firmware/apps/main_app/build/main_app.bin
