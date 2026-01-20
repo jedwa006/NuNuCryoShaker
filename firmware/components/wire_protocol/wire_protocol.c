@@ -221,6 +221,88 @@ size_t wire_build_telemetry(
     return wire_build_frame(out_buf, out_buf_size, MSG_TYPE_TELEMETRY_SNAPSHOT, seq, payload, offset);
 }
 
+size_t wire_build_telemetry_ext(
+    uint8_t *out_buf,
+    size_t out_buf_size,
+    uint16_t seq,
+    uint32_t timestamp_ms,
+    uint16_t di_bits,
+    uint16_t ro_bits,
+    uint32_t alarm_bits,
+    const wire_controller_data_t *controllers,
+    uint8_t controller_count,
+    const wire_telemetry_run_state_t *run_state)
+{
+    uint8_t payload[WIRE_MAX_PAYLOAD];
+    size_t base_len = sizeof(wire_telemetry_header_t) +
+                      controller_count * sizeof(wire_controller_data_t);
+    size_t ext_len = (run_state != NULL) ? sizeof(wire_telemetry_run_state_t) : 0;
+    size_t payload_len = base_len + ext_len;
+
+    if (payload_len > WIRE_MAX_PAYLOAD || controller_count > 3) {
+        return 0;
+    }
+
+    // Build telemetry header (little-endian)
+    size_t offset = 0;
+
+    payload[offset++] = timestamp_ms & 0xFF;
+    payload[offset++] = (timestamp_ms >> 8) & 0xFF;
+    payload[offset++] = (timestamp_ms >> 16) & 0xFF;
+    payload[offset++] = (timestamp_ms >> 24) & 0xFF;
+
+    payload[offset++] = di_bits & 0xFF;
+    payload[offset++] = (di_bits >> 8) & 0xFF;
+
+    payload[offset++] = ro_bits & 0xFF;
+    payload[offset++] = (ro_bits >> 8) & 0xFF;
+
+    payload[offset++] = alarm_bits & 0xFF;
+    payload[offset++] = (alarm_bits >> 8) & 0xFF;
+    payload[offset++] = (alarm_bits >> 16) & 0xFF;
+    payload[offset++] = (alarm_bits >> 24) & 0xFF;
+
+    payload[offset++] = controller_count;
+
+    // Append controller data
+    for (uint8_t i = 0; i < controller_count; i++) {
+        const wire_controller_data_t *c = &controllers[i];
+        payload[offset++] = c->controller_id;
+        payload[offset++] = c->pv_x10 & 0xFF;
+        payload[offset++] = (c->pv_x10 >> 8) & 0xFF;
+        payload[offset++] = c->sv_x10 & 0xFF;
+        payload[offset++] = (c->sv_x10 >> 8) & 0xFF;
+        payload[offset++] = c->op_x10 & 0xFF;
+        payload[offset++] = (c->op_x10 >> 8) & 0xFF;
+        payload[offset++] = c->mode;
+        payload[offset++] = c->age_ms & 0xFF;
+        payload[offset++] = (c->age_ms >> 8) & 0xFF;
+    }
+
+    // Append extended run state if provided
+    if (run_state != NULL) {
+        payload[offset++] = run_state->machine_state;
+
+        payload[offset++] = run_state->run_elapsed_ms & 0xFF;
+        payload[offset++] = (run_state->run_elapsed_ms >> 8) & 0xFF;
+        payload[offset++] = (run_state->run_elapsed_ms >> 16) & 0xFF;
+        payload[offset++] = (run_state->run_elapsed_ms >> 24) & 0xFF;
+
+        payload[offset++] = run_state->run_remaining_ms & 0xFF;
+        payload[offset++] = (run_state->run_remaining_ms >> 8) & 0xFF;
+        payload[offset++] = (run_state->run_remaining_ms >> 16) & 0xFF;
+        payload[offset++] = (run_state->run_remaining_ms >> 24) & 0xFF;
+
+        payload[offset++] = run_state->target_temp_x10 & 0xFF;
+        payload[offset++] = (run_state->target_temp_x10 >> 8) & 0xFF;
+
+        payload[offset++] = run_state->recipe_step;
+        payload[offset++] = run_state->interlock_bits;
+    }
+
+    return wire_build_frame(out_buf, out_buf_size, MSG_TYPE_TELEMETRY_SNAPSHOT, seq, payload, offset);
+}
+
 size_t wire_build_event(
     uint8_t *out_buf,
     size_t out_buf_size,

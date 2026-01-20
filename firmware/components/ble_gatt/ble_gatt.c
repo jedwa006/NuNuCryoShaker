@@ -4,6 +4,7 @@
 #include "telemetry.h"
 #include "relay_ctrl.h"
 #include "status_led.h"
+#include "machine_state.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -254,7 +255,41 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
             break;
         }
 
-        case CMD_START_RUN:
+        case CMD_START_RUN: {
+            if (cmd_payload_len < 5) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint32_t session_id = cmd_payload[0] |
+                                  ((uint32_t)cmd_payload[1] << 8) |
+                                  ((uint32_t)cmd_payload[2] << 16) |
+                                  ((uint32_t)cmd_payload[3] << 24);
+            uint8_t run_mode = cmd_payload[4];
+
+            ESP_LOGI(TAG, "START_RUN: session=0x%08lx mode=%u",
+                     (unsigned long)session_id, run_mode);
+
+            /* Use machine state manager to handle the transition */
+            esp_err_t err = machine_state_start_run(session_id, run_mode, 0, 0);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
+                ESP_LOGW(TAG, "START_RUN rejected: invalid session");
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+                ESP_LOGW(TAG, "START_RUN rejected: not in IDLE state");
+            } else if (err == ESP_ERR_NOT_ALLOWED) {
+                uint8_t interlocks = machine_state_get_interlocks();
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0002, &interlocks, 1);
+                ESP_LOGW(TAG, "START_RUN rejected: interlocks=0x%02X", interlocks);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_HW_FAULT, 0, NULL, 0);
+            }
+            break;
+        }
+
         case CMD_STOP_RUN: {
             if (cmd_payload_len < 5) {
                 send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
@@ -265,18 +300,116 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
                                   ((uint32_t)cmd_payload[1] << 8) |
                                   ((uint32_t)cmd_payload[2] << 16) |
                                   ((uint32_t)cmd_payload[3] << 24);
+            uint8_t stop_mode = cmd_payload[4];
 
-            if (!session_mgr_is_valid(session_id)) {
+            ESP_LOGI(TAG, "STOP_RUN: session=0x%08lx mode=%u",
+                     (unsigned long)session_id, stop_mode);
+
+            esp_err_t err = machine_state_stop_run(session_id, stop_mode);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
                 send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
-                ESP_LOGW(TAG, "RUN command rejected: invalid session");
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_ENABLE_SERVICE_MODE: {
+            if (cmd_payload_len < 4) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
                 break;
             }
 
-            // For now, just ACK - actual run control to be implemented
-            send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
-            ESP_LOGI(TAG, "%s: mode=%u",
-                     cmd_id == CMD_START_RUN ? "START_RUN" : "STOP_RUN",
-                     cmd_payload[4]);
+            uint32_t session_id = cmd_payload[0] |
+                                  ((uint32_t)cmd_payload[1] << 8) |
+                                  ((uint32_t)cmd_payload[2] << 16) |
+                                  ((uint32_t)cmd_payload[3] << 24);
+
+            ESP_LOGI(TAG, "ENABLE_SERVICE_MODE: session=0x%08lx", (unsigned long)session_id);
+
+            esp_err_t err = machine_state_enter_service(session_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_DISABLE_SERVICE_MODE: {
+            if (cmd_payload_len < 4) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint32_t session_id = cmd_payload[0] |
+                                  ((uint32_t)cmd_payload[1] << 8) |
+                                  ((uint32_t)cmd_payload[2] << 16) |
+                                  ((uint32_t)cmd_payload[3] << 24);
+
+            ESP_LOGI(TAG, "DISABLE_SERVICE_MODE: session=0x%08lx", (unsigned long)session_id);
+
+            esp_err_t err = machine_state_exit_service(session_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_CLEAR_ESTOP: {
+            if (cmd_payload_len < 4) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint32_t session_id = cmd_payload[0] |
+                                  ((uint32_t)cmd_payload[1] << 8) |
+                                  ((uint32_t)cmd_payload[2] << 16) |
+                                  ((uint32_t)cmd_payload[3] << 24);
+
+            ESP_LOGI(TAG, "CLEAR_ESTOP: session=0x%08lx", (unsigned long)session_id);
+
+            esp_err_t err = machine_state_clear_estop(session_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
+            } else {
+                /* E-stop still active */
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0x0003, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_CLEAR_LATCHED_ALARMS: {
+            if (cmd_payload_len < 4) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint32_t session_id = cmd_payload[0] |
+                                  ((uint32_t)cmd_payload[1] << 8) |
+                                  ((uint32_t)cmd_payload[2] << 16) |
+                                  ((uint32_t)cmd_payload[3] << 24);
+
+            ESP_LOGI(TAG, "CLEAR_LATCHED_ALARMS: session=0x%08lx", (unsigned long)session_id);
+
+            esp_err_t err = machine_state_clear_fault(session_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            }
             break;
         }
 
