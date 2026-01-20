@@ -5,6 +5,7 @@ on:
     branches:
       - dev
       - main
+      - 'feature/**'
   pull_request:
     branches:
       - main
@@ -29,3 +30,37 @@ jobs:
 
       - name: Check main_app size
         run: python3 firmware/tools/check_app_size.py firmware/apps/main_app/build/main_app.bin
+
+      - name: Extract firmware version
+        id: version
+        run: |
+          VERSION=$(grep -E "^#define FW_VERSION_(MAJOR|MINOR|PATCH)" firmware/components/version/include/fw_version.h | \
+            awk '{print $3}' | tr '\n' '.' | sed 's/\.$//')
+          BUILD_ID=$(grep -E "^#define FW_BUILD_ID" firmware/components/version/include/fw_version.h | \
+            awk '{print $3}')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "build_id=${BUILD_ID}" >> $GITHUB_OUTPUT
+          echo "Firmware version: ${VERSION} (build ${BUILD_ID})"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.version.outputs.version }}
+          path: |
+            firmware/apps/main_app/build/main_app.bin
+            firmware/apps/recovery_factory/build/recovery.bin
+          retention-days: 30
+
+      - name: Build summary
+        run: |
+          echo "## Firmware Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| App | Size | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|------|--------|" >> $GITHUB_STEP_SUMMARY
+          MAIN_SIZE=$(stat -c%s firmware/apps/main_app/build/main_app.bin)
+          RECOVERY_SIZE=$(stat -c%s firmware/apps/recovery_factory/build/recovery.bin)
+          echo "| main_app | ${MAIN_SIZE} bytes | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| recovery_factory | ${RECOVERY_SIZE} bytes | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build ID:** ${{ steps.version.outputs.build_id }}" >> $GITHUB_STEP_SUMMARY
