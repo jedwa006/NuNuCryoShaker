@@ -86,6 +86,38 @@ Periodic (~10 Hz) status plus change-driven immediate updates.
 - Valid: **1, 2, 3**
 - Typical bring-up: only #3 present
 
+### Extended Telemetry (Machine State)
+When machine state is enabled, the following fields are appended after controller data:
+
+| Field | Type | Size | Notes |
+|---|---:|---:|---|
+| machine_state | u8 | 1 | Current state (see below) |
+| run_elapsed_ms | u32 | 4 | Time since run started |
+| run_remaining_ms | u32 | 4 | Estimated time remaining |
+| target_temp_x10 | i16 | 2 | Target temperature × 10 |
+| recipe_step | u8 | 1 | Current recipe step (0 if none) |
+| interlock_bits | u8 | 1 | Which interlocks are active |
+
+### Machine State Values
+| Value | State | Description |
+|---:|---|---|
+| 0 | IDLE | Ready for commands |
+| 1 | PRECOOL | Cooling to target temperature |
+| 2 | RUNNING | Motor active, milling in progress |
+| 3 | STOPPING | Thermal soak before idle |
+| 4 | E_STOP | Emergency stop active |
+| 5 | FAULT | Fault condition (motor, door, etc.) |
+| 6 | SERVICE | Manual relay control mode |
+
+### Interlock Bits
+| Bit | Name | Description |
+|---:|---|---|
+| 0 | ESTOP | E-stop button pressed (DI1 LOW) |
+| 1 | DOOR_OPEN | Door interlock open (DI2 LOW) |
+| 2 | LN2_ABSENT | LN2 level low (DI3 LOW) |
+| 3 | MOTOR_FAULT | Motor fault signal (DI4 HIGH) |
+| 4 | HMI_STALE | No recent keepalive from app |
+
 ---
 
 ## 4) Commands: COMMAND (0x10)
@@ -106,17 +138,21 @@ Periodic (~10 Hz) status plus change-driven immediate updates.
 |---:|---|---|
 | 0x0100 | OPEN_SESSION | `client_nonce(u32)` |
 | 0x0101 | KEEPALIVE | `session_id(u32)` |
-| 0x0102 | START_RUN | `session_id(u32)`, `run_mode(u8)` |
+| 0x0102 | START_RUN | `session_id(u32)`, `run_mode(u8)`, `target_temp_x10(i16)`, `run_duration_ms(u32)` |
 | 0x0103 | STOP_RUN | `session_id(u32)`, `stop_mode(u8)` |
+| 0x0110 | ENABLE_SERVICE_MODE | `session_id(u32)` |
+| 0x0111 | DISABLE_SERVICE_MODE | `session_id(u32)` |
+| 0x0112 | CLEAR_ESTOP | `session_id(u32)` |
+| 0x0113 | CLEAR_FAULT | `session_id(u32)` |
 
 Recommended modes:
 - `run_mode`:
-  - 0 = NORMAL
-  - 1 = DRY_RUN (no high-power outputs)
-  - 2 = SERVICE
+  - 0 = NORMAL (precool → run → stop)
+  - 1 = PRECOOL_ONLY (precool → stop, no motor run)
+  - 2 = SKIP_PRECOOL (immediate motor run)
 - `stop_mode`:
-  - 0 = NORMAL_STOP
-  - 1 = ABORT (fast stop, keep safe)
+  - 0 = NORMAL_STOP (thermal soak, then idle)
+  - 1 = ABORT (fast stop, immediate idle)
 
 #### I/O control
 | cmd_id | Name | Payload |
@@ -212,18 +248,28 @@ Source:
 ### Event IDs (initial set)
 | event_id | Name | Severity | Source | Data |
 |---:|---|---|---:|---|
-| 0x1001 | ESTOP_ASSERTED | CRITICAL | 0 | `state(u8=1)` |
-| 0x1002 | ESTOP_CLEARED | ALARM/WARN (policy) | 0 | `state(u8=0)` |
+| 0x1001 | ESTOP_ASSERTED | CRITICAL | 0 | none |
+| 0x1002 | ESTOP_CLEARED | INFO | 0 | none |
 | 0x1100 | HMI_CONNECTED | INFO | 0 | optional |
 | 0x1101 | HMI_DISCONNECTED | WARN | 0 | optional |
-| 0x1200 | RUN_STARTED | INFO | 0 | `run_mode(u8)` |
-| 0x1201 | RUN_STOPPED | INFO | 0 | `stop_mode(u8)` |
+| 0x1200 | RUN_STARTED | INFO | 0 | none |
+| 0x1201 | RUN_STOPPED | INFO | 0 | none |
+| 0x1202 | RUN_ABORTED | ALARM | 0 | none (fault/e-stop during run) |
+| 0x1203 | PRECOOL_COMPLETE | INFO | 0 | none (target temp reached) |
+| 0x1204 | STATE_CHANGED | varies | 0 | `old_state(u8)`, `new_state(u8)` |
 | 0x1300 | RS485_DEVICE_ONLINE | INFO | 1..3 | `controller_id(u8)` |
 | 0x1301 | RS485_DEVICE_OFFLINE | WARN/ALARM | 1..3 | `controller_id(u8)` |
 | 0x1400 | ALARM_LATCHED | ALARM/CRITICAL | 0 or 1..3 | `alarm_bits(u32)` |
 | 0x1401 | ALARM_CLEARED | INFO/WARN | 0 or 1..3 | `alarm_bits(u32)` |
 
-Critical events must use **Indicate**.
+### STATE_CHANGED Severity
+The severity of STATE_CHANGED events depends on the new state:
+- CRITICAL if new_state = E_STOP
+- ALARM if new_state = FAULT
+- WARN if new_state = STOPPING
+- INFO otherwise
+
+Critical events (ESTOP_ASSERTED, RUN_ABORTED, STATE_CHANGED to E_STOP/FAULT) must use **Indicate**.
 
 ---
 
