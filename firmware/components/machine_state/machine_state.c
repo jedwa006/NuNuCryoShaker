@@ -5,6 +5,7 @@
 #include "wire_protocol.h"
 #include "pid_controller.h"
 #include "ble_gatt.h"
+#include "safety_gate.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -205,15 +206,10 @@ uint8_t machine_state_get_interlocks(void)
 
 bool machine_state_start_allowed(void)
 {
-    /* Interlocks that block start (LN2 absence is warning only)
-     * Note: MOTOR_FAULT removed - soft starter has no fault output.
-     * Can be re-added when accelerometer-based fault detection is implemented. */
-    uint8_t blocking_interlocks = INTERLOCK_BIT_ESTOP |
-                                   INTERLOCK_BIT_DOOR_OPEN |
-                                   INTERLOCK_BIT_HMI_STALE;
-
-    uint8_t interlocks = machine_state_get_interlocks();
-    return (interlocks & blocking_interlocks) == 0;
+    /* Use the safety gate framework for comprehensive start checks.
+     * This evaluates E-stop, door, HMI, and PID-related gates based on
+     * configured capability levels and gate bypass states. */
+    return safety_gate_can_start_run(NULL);
 }
 
 esp_err_t machine_state_start_run(uint32_t session_id, run_mode_t mode,

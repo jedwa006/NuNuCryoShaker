@@ -7,4 +7,5 @@ idf_component_register(
         ble_gatt
         session_mgr
         pid_controller
+        safety_gate
 )

@@ -6,6 +6,7 @@
 #include "status_led.h"
 #include "machine_state.h"
 #include "pid_controller.h"
+#include "safety_gate.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -926,6 +927,110 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
 
             uint8_t timeout_minutes = pid_controller_get_idle_timeout();
             send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, &timeout_minutes, 1);
+            break;
+        }
+
+        /* ===== Safety Gate Commands ===== */
+
+        case CMD_GET_CAPABILITIES: {
+            /* No payload required */
+            ESP_LOGI(TAG, "GET_CAPABILITIES");
+
+            wire_ack_capabilities_t caps;
+            uint8_t cap_array[SUBSYS_MAX];
+            safety_gate_get_all_capabilities(cap_array);
+
+            caps.pid1_cap = cap_array[SUBSYS_PID1];
+            caps.pid2_cap = cap_array[SUBSYS_PID2];
+            caps.pid3_cap = cap_array[SUBSYS_PID3];
+            caps.di1_cap = cap_array[SUBSYS_DI_ESTOP];
+            caps.di2_cap = cap_array[SUBSYS_DI_DOOR];
+            caps.di3_cap = cap_array[SUBSYS_DI_LN2];
+            caps.di4_cap = cap_array[SUBSYS_DI_MOTOR];
+            caps.reserved = 0;
+
+            send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0,
+                     (const uint8_t *)&caps, sizeof(caps));
+            break;
+        }
+
+        case CMD_SET_CAPABILITY: {
+            /* Payload: subsystem_id (u8), capability (u8) */
+            if (cmd_payload_len < sizeof(wire_cmd_set_capability_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t subsys_id = cmd_payload[0];
+            uint8_t capability = cmd_payload[1];
+
+            ESP_LOGI(TAG, "SET_CAPABILITY: subsys=%u cap=%u", subsys_id, capability);
+
+            /* Validate subsystem_id */
+            if (subsys_id >= SUBSYS_MAX) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            /* Validate capability level */
+            if (capability > CAP_REQUIRED) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = safety_gate_set_capability((subsystem_id_t)subsys_id,
+                                                       (capability_level_t)capability);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                /* Trying to change E-Stop capability */
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0002, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_HW_FAULT, 0, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_GET_SAFETY_GATES: {
+            /* No payload required */
+            ESP_LOGI(TAG, "GET_SAFETY_GATES");
+
+            wire_ack_safety_gates_t gates;
+            gates.gate_enable = safety_gate_get_enable_mask();
+            gates.gate_status = safety_gate_get_status_mask();
+
+            send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0,
+                     (const uint8_t *)&gates, sizeof(gates));
+            break;
+        }
+
+        case CMD_SET_SAFETY_GATE: {
+            /* Payload: gate_id (u8), enabled (u8) */
+            if (cmd_payload_len < sizeof(wire_cmd_set_safety_gate_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t gate_id = cmd_payload[0];
+            uint8_t enabled = cmd_payload[1];
+
+            ESP_LOGI(TAG, "SET_SAFETY_GATE: gate=%u enabled=%u", gate_id, enabled);
+
+            /* Validate gate_id */
+            if (gate_id >= GATE_MAX) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = safety_gate_set_enabled((gate_id_t)gate_id, enabled != 0);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                /* Trying to bypass E-Stop gate */
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0002, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_HW_FAULT, 0, NULL, 0);
+            }
             break;
         }
 

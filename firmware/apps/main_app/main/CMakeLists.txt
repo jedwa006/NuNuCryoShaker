@@ -11,4 +11,5 @@ idf_component_register(
         status_led
         pid_controller
         machine_state
+        safety_gate
 )

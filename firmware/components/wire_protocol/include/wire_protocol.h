@@ -70,6 +70,12 @@ typedef enum {
     CMD_DISABLE_SERVICE_MODE    = 0x0111,
     CMD_CLEAR_ESTOP             = 0x0112,
     CMD_CLEAR_FAULT             = 0x0113,
+
+    /* Safety Gate Commands (0x0070 - 0x007F) */
+    CMD_GET_CAPABILITIES        = 0x0070,   /* Get subsystem capability levels */
+    CMD_SET_CAPABILITY          = 0x0071,   /* Set subsystem capability level */
+    CMD_GET_SAFETY_GATES        = 0x0072,   /* Get safety gate enable/status */
+    CMD_SET_SAFETY_GATE         = 0x0073,   /* Enable/bypass a safety gate */
 } wire_cmd_id_t;
 
 /* Command ACK Status Codes */
@@ -121,6 +127,13 @@ typedef enum {
 #define ALARM_BIT_PID1_FAULT            (1 << 6)
 #define ALARM_BIT_PID2_FAULT            (1 << 7)
 #define ALARM_BIT_PID3_FAULT            (1 << 8)
+/* Safety Gate Extension (bits 9-15) */
+#define ALARM_BIT_GATE_DOOR_BYPASSED    (1 << 9)    /* Door gate is bypassed */
+#define ALARM_BIT_GATE_HMI_BYPASSED     (1 << 10)   /* HMI gate is bypassed */
+#define ALARM_BIT_GATE_PID_BYPASSED     (1 << 11)   /* Any PID gate bypassed */
+#define ALARM_BIT_PID1_PROBE_ERROR      (1 << 12)   /* PID1 has probe error (HHHH/LLLL) */
+#define ALARM_BIT_PID2_PROBE_ERROR      (1 << 13)   /* PID2 has probe error (HHHH/LLLL) */
+#define ALARM_BIT_PID3_PROBE_ERROR      (1 << 14)   /* PID3 has probe error (HHHH/LLLL) */
 
 /* Controller Modes */
 typedef enum {
@@ -305,6 +318,36 @@ typedef struct __attribute__((packed)) {
     uint8_t  source;            // 0=SYSTEM, 1..3=controller_id
     // Followed by event-specific data
 } wire_event_header_t;
+
+/* GET_CAPABILITIES ACK optional data */
+typedef struct __attribute__((packed)) {
+    uint8_t  pid1_cap;          /* PID1 capability (0=NOT_PRESENT, 1=OPTIONAL, 2=REQUIRED) */
+    uint8_t  pid2_cap;          /* PID2 capability */
+    uint8_t  pid3_cap;          /* PID3 capability */
+    uint8_t  di1_cap;           /* E-Stop DI capability (always 2=REQUIRED) */
+    uint8_t  di2_cap;           /* Door sensor capability */
+    uint8_t  di3_cap;           /* LN2 sensor capability */
+    uint8_t  di4_cap;           /* Motor fault capability */
+    uint8_t  reserved;          /* Reserved for expansion */
+} wire_ack_capabilities_t;
+
+/* SET_CAPABILITY command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  subsystem_id;      /* Subsystem ID (0-6) */
+    uint8_t  capability;        /* Capability level (0-2) */
+} wire_cmd_set_capability_t;
+
+/* GET_SAFETY_GATES ACK optional data */
+typedef struct __attribute__((packed)) {
+    uint16_t gate_enable;       /* Bitmask: 1=gate enabled, 0=bypassed (LE u16) */
+    uint16_t gate_status;       /* Bitmask: 1=gate passing, 0=blocking (LE u16) */
+} wire_ack_safety_gates_t;
+
+/* SET_SAFETY_GATE command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  gate_id;           /* Gate ID (0-9) */
+    uint8_t  enabled;           /* 1=enable gate, 0=bypass gate */
+} wire_cmd_set_safety_gate_t;
 
 /*
  * CRC-16/CCITT-FALSE

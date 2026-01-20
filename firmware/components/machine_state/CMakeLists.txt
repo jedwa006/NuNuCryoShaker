@@ -10,4 +10,5 @@ idf_component_register(
         wire_protocol
         pid_controller
         ble_gatt
+        safety_gate
 )
