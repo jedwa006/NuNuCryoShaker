@@ -11,4 +11,5 @@ idf_component_register(
         relay_ctrl
         status_led
         machine_state
+        pid_controller
 )

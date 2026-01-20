@@ -5,6 +5,7 @@
 #include "relay_ctrl.h"
 #include "status_led.h"
 #include "machine_state.h"
+#include "pid_controller.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -197,6 +198,9 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
 
     ESP_LOGI(TAG, "Command: cmd_id=0x%04X seq=%u payload_len=%u",
              cmd_id, header.seq, (unsigned)cmd_payload_len);
+
+    /* Signal activity to reset lazy polling timer */
+    pid_controller_signal_activity();
 
     switch (cmd_id) {
         case CMD_OPEN_SESSION: {
@@ -501,6 +505,424 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
                      old_ro_bits, new_ro_bits, mask, values);
 
             send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            break;
+        }
+
+        /* ===== PID Controller Commands ===== */
+
+        case CMD_SET_SV: {
+            /* Payload: controller_id (u8), sv_x10 (i16) */
+            if (cmd_payload_len < sizeof(wire_cmd_set_sv_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+            int16_t sv_x10 = (int16_t)(cmd_payload[1] | ((uint16_t)cmd_payload[2] << 8));
+            float sv_celsius = sv_x10 / 10.0f;
+
+            ESP_LOGI(TAG, "SET_SV: controller=%u sv=%.1f C", ctrl_id, sv_celsius);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = pid_controller_set_sv(ctrl_id, sv_celsius);
+            if (err == ESP_OK) {
+                /* Force a poll to update cached data */
+                pid_controller_force_poll(ctrl_id);
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_SET_MODE: {
+            /* Payload: controller_id (u8), mode (u8) */
+            if (cmd_payload_len < sizeof(wire_cmd_set_mode_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+            uint8_t mode = cmd_payload[1];
+
+            ESP_LOGI(TAG, "SET_MODE: controller=%u mode=%u", ctrl_id, mode);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = pid_controller_set_mode(ctrl_id, mode);
+            if (err == ESP_OK) {
+                pid_controller_force_poll(ctrl_id);
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_REQUEST_PV_SV_REFRESH: {
+            /* Payload: controller_id (u8) */
+            if (cmd_payload_len < 1) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+
+            ESP_LOGI(TAG, "REQUEST_PV_SV_REFRESH: controller=%u", ctrl_id);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = pid_controller_force_poll(ctrl_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_NOT_FOUND) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_SET_PID_PARAMS: {
+            /* Payload: controller_id (u8), p_gain_x10 (i16), i_time (u16), d_time (u16) */
+            if (cmd_payload_len < sizeof(wire_cmd_set_pid_params_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+            int16_t p_x10 = (int16_t)(cmd_payload[1] | ((uint16_t)cmd_payload[2] << 8));
+            uint16_t i_time = cmd_payload[3] | ((uint16_t)cmd_payload[4] << 8);
+            uint16_t d_time = cmd_payload[5] | ((uint16_t)cmd_payload[6] << 8);
+            float p_gain = p_x10 / 10.0f;
+
+            ESP_LOGI(TAG, "SET_PID_PARAMS: controller=%u P=%.1f I=%u D=%u",
+                     ctrl_id, p_gain, i_time, d_time);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = pid_controller_write_params(ctrl_id, p_gain, i_time, d_time);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_READ_PID_PARAMS: {
+            /* Payload: controller_id (u8) */
+            if (cmd_payload_len < 1) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+
+            ESP_LOGI(TAG, "READ_PID_PARAMS: controller=%u", ctrl_id);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            float p_gain;
+            uint16_t i_time, d_time;
+            esp_err_t err = pid_controller_read_params(ctrl_id, &p_gain, &i_time, &d_time);
+
+            if (err == ESP_OK) {
+                wire_ack_pid_params_t params;
+                params.controller_id = ctrl_id;
+                params.p_gain_x10 = (int16_t)(p_gain * 10.0f + 0.5f);
+                params.i_time = i_time;
+                params.d_time = d_time;
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0,
+                         (const uint8_t *)&params, sizeof(params));
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_START_AUTOTUNE: {
+            /* Payload: controller_id (u8) */
+            if (cmd_payload_len < sizeof(wire_cmd_autotune_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+
+            ESP_LOGI(TAG, "START_AUTOTUNE: controller=%u", ctrl_id);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = pid_controller_start_autotune(ctrl_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_STOP_AUTOTUNE: {
+            /* Payload: controller_id (u8) */
+            if (cmd_payload_len < sizeof(wire_cmd_autotune_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+
+            ESP_LOGI(TAG, "STOP_AUTOTUNE: controller=%u", ctrl_id);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = pid_controller_stop_autotune(ctrl_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_SET_ALARM_LIMITS: {
+            /* Payload: controller_id (u8), alarm1_x10 (i16), alarm2_x10 (i16) */
+            if (cmd_payload_len < sizeof(wire_cmd_set_alarm_limits_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+            int16_t al1_x10 = (int16_t)(cmd_payload[1] | ((uint16_t)cmd_payload[2] << 8));
+            int16_t al2_x10 = (int16_t)(cmd_payload[3] | ((uint16_t)cmd_payload[4] << 8));
+            float al1 = al1_x10 / 10.0f;
+            float al2 = al2_x10 / 10.0f;
+
+            ESP_LOGI(TAG, "SET_ALARM_LIMITS: controller=%u AL1=%.1f AL2=%.1f",
+                     ctrl_id, al1, al2);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            esp_err_t err = pid_controller_set_alarm_limits(ctrl_id, al1, al2);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_READ_ALARM_LIMITS: {
+            /* Payload: controller_id (u8) */
+            if (cmd_payload_len < 1) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+
+            ESP_LOGI(TAG, "READ_ALARM_LIMITS: controller=%u", ctrl_id);
+
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            float al1, al2;
+            esp_err_t err = pid_controller_read_alarm_limits(ctrl_id, &al1, &al2);
+
+            if (err == ESP_OK) {
+                wire_ack_alarm_limits_t limits;
+                limits.controller_id = ctrl_id;
+                limits.alarm1_x10 = (int16_t)(al1 * 10.0f + 0.5f);
+                limits.alarm2_x10 = (int16_t)(al2 * 10.0f + 0.5f);
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0,
+                         (const uint8_t *)&limits, sizeof(limits));
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        /* ===== Generic Register Commands ===== */
+
+        case CMD_READ_REGISTERS: {
+            /* Payload: controller_id (u8), start_address (u16 LE), count (u8) */
+            if (cmd_payload_len < sizeof(wire_cmd_read_registers_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+            uint16_t start_addr = cmd_payload[1] | ((uint16_t)cmd_payload[2] << 8);
+            uint8_t count = cmd_payload[3];
+
+            ESP_LOGI(TAG, "READ_REGISTERS: controller=%u start=%u count=%u",
+                     ctrl_id, start_addr, count);
+
+            /* Validate controller_id */
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            /* Validate count (1-16) */
+            if (count == 0 || count > 16) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            /* Read registers */
+            uint16_t values[16];
+            esp_err_t err = pid_controller_read_registers(ctrl_id, start_addr, count, values);
+
+            if (err == ESP_OK) {
+                /* Build response: header (4 bytes) + values (2*count bytes) */
+                uint8_t ack_data[4 + 32]; /* max 4 + 16*2 = 36 bytes */
+                ack_data[0] = ctrl_id;
+                ack_data[1] = start_addr & 0xFF;
+                ack_data[2] = (start_addr >> 8) & 0xFF;
+                ack_data[3] = count;
+                for (int i = 0; i < count; i++) {
+                    ack_data[4 + i*2] = values[i] & 0xFF;
+                    ack_data[4 + i*2 + 1] = (values[i] >> 8) & 0xFF;
+                }
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0,
+                         ack_data, 4 + count * 2);
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_WRITE_REGISTER: {
+            /* Payload: controller_id (u8), address (u16 LE), value (u16 LE) */
+            if (cmd_payload_len < sizeof(wire_cmd_write_register_t)) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t ctrl_id = cmd_payload[0];
+            uint16_t address = cmd_payload[1] | ((uint16_t)cmd_payload[2] << 8);
+            uint16_t value = cmd_payload[3] | ((uint16_t)cmd_payload[4] << 8);
+
+            ESP_LOGI(TAG, "WRITE_REGISTER: controller=%u addr=%u value=0x%04X",
+                     ctrl_id, address, value);
+
+            /* Validate controller_id */
+            if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            /* Protect RS-485 communication registers from writes */
+            if (address >= 49 && address <= 51) {
+                ESP_LOGW(TAG, "WRITE_REGISTER: protected register %u", address);
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
+                break;
+            }
+
+            /* Write register with verification */
+            uint16_t verified_value = 0;
+            esp_err_t err = pid_controller_write_register(ctrl_id, address, value, &verified_value);
+
+            if (err == ESP_OK) {
+                /* Build response with verified value */
+                wire_ack_write_register_t ack;
+                ack.controller_id = ctrl_id;
+                ack.address = address;
+                ack.value = verified_value;
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0,
+                         (const uint8_t *)&ack, sizeof(ack));
+            } else if (err == ESP_ERR_INVALID_STATE) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_RESPONSE) {
+                /* Write succeeded but verification failed - return HW_FAULT with the actual value */
+                wire_ack_write_register_t ack;
+                ack.controller_id = ctrl_id;
+                ack.address = address;
+                ack.value = verified_value;
+                send_ack(header.seq, cmd_id, CMD_STATUS_HW_FAULT, 0,
+                         (const uint8_t *)&ack, sizeof(ack));
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_TIMEOUT, 0x0004, NULL, 0);
+            }
+            break;
+        }
+
+        /* ===== Configuration Commands ===== */
+
+        case CMD_SET_IDLE_TIMEOUT: {
+            /* Payload: timeout_minutes (u8) */
+            if (cmd_payload_len < 1) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint8_t timeout_minutes = cmd_payload[0];
+
+            ESP_LOGI(TAG, "SET_IDLE_TIMEOUT: %u minutes", timeout_minutes);
+
+            esp_err_t err = pid_controller_set_idle_timeout(timeout_minutes);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_HW_FAULT, 0, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_GET_IDLE_TIMEOUT: {
+            /* No payload required */
+            ESP_LOGI(TAG, "GET_IDLE_TIMEOUT");
+
+            uint8_t timeout_minutes = pid_controller_get_idle_timeout();
+            send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, &timeout_minutes, 1);
             break;
         }
 

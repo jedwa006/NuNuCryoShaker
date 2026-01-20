@@ -33,18 +33,39 @@ typedef enum {
 
 /* Command IDs */
 typedef enum {
+    /* I/O Control (0x0001 - 0x000F) */
     CMD_SET_RELAY               = 0x0001,
     CMD_SET_RELAY_MASK          = 0x0002,
-    CMD_SET_SV                  = 0x0020,
-    CMD_SET_MODE                = 0x0021,
-    CMD_REQUEST_PV_SV_REFRESH   = 0x0022,
+
+    /* PID Controller Commands (0x0020 - 0x003F) */
+    CMD_SET_SV                  = 0x0020,   /* Set temperature setpoint */
+    CMD_SET_MODE                = 0x0021,   /* Set controller mode */
+    CMD_REQUEST_PV_SV_REFRESH   = 0x0022,   /* Force immediate poll */
+    CMD_SET_PID_PARAMS          = 0x0023,   /* Write P, I, D tuning */
+    CMD_READ_PID_PARAMS         = 0x0024,   /* Read P, I, D tuning */
+    CMD_START_AUTOTUNE          = 0x0025,   /* Start auto-tune cycle */
+    CMD_STOP_AUTOTUNE           = 0x0026,   /* Stop auto-tune cycle */
+    CMD_SET_ALARM_LIMITS        = 0x0027,   /* Set alarm setpoints */
+    CMD_READ_ALARM_LIMITS       = 0x0028,   /* Read alarm setpoints */
+    CMD_READ_REGISTERS          = 0x0030,   /* Read Modbus registers */
+    CMD_WRITE_REGISTER          = 0x0031,   /* Write single Modbus register */
+
+    /* Configuration Commands (0x0040 - 0x004F) */
+    CMD_SET_IDLE_TIMEOUT        = 0x0040,   /* Set lazy polling idle timeout */
+    CMD_GET_IDLE_TIMEOUT        = 0x0041,   /* Get lazy polling idle timeout */
+
+    /* Diagnostics (0x00F0 - 0x00FF) */
     CMD_REQUEST_SNAPSHOT_NOW    = 0x00F0,
     CMD_CLEAR_WARNINGS          = 0x00F1,
     CMD_CLEAR_LATCHED_ALARMS    = 0x00F2,
+
+    /* Session Management (0x0100 - 0x010F) */
     CMD_OPEN_SESSION            = 0x0100,
     CMD_KEEPALIVE               = 0x0101,
     CMD_START_RUN               = 0x0102,
     CMD_STOP_RUN                = 0x0103,
+
+    /* Service Mode (0x0110 - 0x011F) */
     CMD_ENABLE_SERVICE_MODE     = 0x0110,
     CMD_DISABLE_SERVICE_MODE    = 0x0111,
     CMD_CLEAR_ESTOP             = 0x0112,
@@ -77,6 +98,9 @@ typedef enum {
     EVENT_RS485_DEVICE_OFFLINE  = 0x1301,
     EVENT_ALARM_LATCHED         = 0x1400,
     EVENT_ALARM_CLEARED         = 0x1401,
+    EVENT_AUTOTUNE_STARTED      = 0x1500,
+    EVENT_AUTOTUNE_COMPLETE     = 0x1501,
+    EVENT_AUTOTUNE_FAILED       = 0x1502,
 } wire_event_id_t;
 
 /* Event Severity */
@@ -126,13 +150,16 @@ typedef struct __attribute__((packed)) {
 
 /* Extended telemetry with machine state (appended after controllers) */
 typedef struct __attribute__((packed)) {
-    uint8_t  machine_state;     // machine_state_t enum value
-    uint32_t run_elapsed_ms;    // Time since run started (0 if not running)
-    uint32_t run_remaining_ms;  // Time until run completes (0 if no target)
-    int16_t  target_temp_x10;   // Current target temperature × 10
-    uint8_t  recipe_step;       // Current recipe step (0-based)
-    uint8_t  interlock_bits;    // Which interlocks are blocking start
-} wire_telemetry_run_state_t;
+    uint8_t  machine_state;     // machine_state_t enum value (offset 0)
+    uint32_t run_elapsed_ms;    // Time since run started (offset 1)
+    uint32_t run_remaining_ms;  // Time until run completes (offset 5)
+    int16_t  target_temp_x10;   // Current target temperature × 10 (offset 9)
+    uint8_t  recipe_step;       // Current recipe step (offset 11)
+    uint8_t  interlock_bits;    // Which interlocks are blocking start (offset 12)
+    uint8_t  lazy_poll_active;  // 1 if lazy polling active (offset 13)
+    uint8_t  idle_timeout_min;  // Idle timeout in minutes, 0=disabled (offset 14)
+    uint8_t  reserved;          // Reserved for future use (offset 15)
+} wire_telemetry_run_state_t;   // Total: 16 bytes
 
 typedef struct __attribute__((packed)) {
     uint8_t  controller_id;     // 1, 2, or 3
@@ -142,6 +169,26 @@ typedef struct __attribute__((packed)) {
     uint8_t  mode;              // wire_ctrl_mode_t
     uint16_t age_ms;            // How fresh the RS-485 sample is
 } wire_controller_data_t;
+
+/* Extended controller data with status flags */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     // 1, 2, or 3
+    int16_t  pv_x10;            // Process Variable × 10
+    int16_t  sv_x10;            // Setpoint Value × 10
+    uint16_t op_x10;            // Output % × 10
+    uint8_t  mode;              // wire_ctrl_mode_t
+    uint16_t age_ms;            // How fresh the RS-485 sample is
+    uint8_t  status_flags;      // PID status (alarm1, alarm2, autotune, etc.)
+} wire_controller_data_ext_t;
+
+/* Controller status flags */
+#define CTRL_STATUS_ALARM1      (1 << 0)    /* Alarm 1 active */
+#define CTRL_STATUS_ALARM2      (1 << 1)    /* Alarm 2 active */
+#define CTRL_STATUS_OUTPUT1     (1 << 2)    /* Output 1 active */
+#define CTRL_STATUS_OUTPUT2     (1 << 3)    /* Output 2 active */
+#define CTRL_STATUS_AUTOTUNE    (1 << 4)    /* Auto-tune in progress */
+#define CTRL_STATUS_STALE       (1 << 5)    /* Data is stale */
+#define CTRL_STATUS_OFFLINE     (1 << 6)    /* Controller offline */
 
 /* Command payload header */
 typedef struct __attribute__((packed)) {
@@ -174,6 +221,82 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint32_t session_id;
 } wire_cmd_keepalive_t;
+
+/* SET_SV command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     /* 1, 2, or 3 */
+    int16_t  sv_x10;            /* Setpoint × 10 */
+} wire_cmd_set_sv_t;
+
+/* SET_MODE command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     /* 1, 2, or 3 */
+    uint8_t  mode;              /* wire_ctrl_mode_t */
+} wire_cmd_set_mode_t;
+
+/* SET_PID_PARAMS command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     /* 1, 2, or 3 */
+    int16_t  p_gain_x10;        /* P gain × 10 */
+    uint16_t i_time;            /* I time in seconds */
+    uint16_t d_time;            /* D time in seconds */
+} wire_cmd_set_pid_params_t;
+
+/* READ_PID_PARAMS ACK optional data */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;
+    int16_t  p_gain_x10;
+    uint16_t i_time;
+    uint16_t d_time;
+} wire_ack_pid_params_t;
+
+/* START/STOP_AUTOTUNE command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     /* 1, 2, or 3 */
+} wire_cmd_autotune_t;
+
+/* SET_ALARM_LIMITS command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     /* 1, 2, or 3 */
+    int16_t  alarm1_x10;        /* Alarm 1 setpoint × 10 */
+    int16_t  alarm2_x10;        /* Alarm 2 setpoint × 10 */
+} wire_cmd_set_alarm_limits_t;
+
+/* READ_ALARM_LIMITS ACK optional data */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;
+    int16_t  alarm1_x10;
+    int16_t  alarm2_x10;
+} wire_ack_alarm_limits_t;
+
+/* READ_REGISTERS command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     /* 1, 2, or 3 */
+    uint16_t start_address;     /* Starting register address */
+    uint8_t  count;             /* Number of registers (1-16) */
+} wire_cmd_read_registers_t;
+
+/* READ_REGISTERS ACK optional data (variable size) */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;
+    uint16_t start_address;
+    uint8_t  count;
+    /* Followed by count × uint16_t values (little-endian) */
+} wire_ack_read_registers_t;
+
+/* WRITE_REGISTER command payload */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;     /* 1, 2, or 3 */
+    uint16_t address;           /* Register address */
+    uint16_t value;             /* Value to write */
+} wire_cmd_write_register_t;
+
+/* WRITE_REGISTER ACK optional data */
+typedef struct __attribute__((packed)) {
+    uint8_t  controller_id;
+    uint16_t address;
+    uint16_t value;             /* Verified value after read-back */
+} wire_ack_write_register_t;
 
 /* Event payload */
 typedef struct __attribute__((packed)) {

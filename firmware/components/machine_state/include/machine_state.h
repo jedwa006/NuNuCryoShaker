@@ -61,12 +61,13 @@ typedef enum {
 #define DI_MOTOR_FAULT      4       /* DI4: VFD fault (HIGH = fault) */
 
 /* Relay Output Channels (1-based indexing to match hardware labels) */
-#define RO_MAIN_CONTACTOR   1       /* CH1: Motor power enable */
-#define RO_HEATER_1         2       /* CH2: Axle bearing heater */
-#define RO_HEATER_2         3       /* CH3: Orbital bearing heater */
-#define RO_LN2_VALVE        4       /* CH4: LN2 solenoid */
-#define RO_DOOR_LOCK        5       /* CH5: Door lock solenoid */
-#define RO_CHAMBER_LIGHT    6       /* CH6: Chamber lighting */
+#define RO_MAIN_CONTACTOR   1       /* CH1: Motor circuit power (contactor + soft starter) */
+#define RO_MOTOR_START      2       /* CH2: Soft starter START signal */
+#define RO_HEATER_1         3       /* CH3: Axle bearing heater */
+#define RO_HEATER_2         4       /* CH4: Orbital bearing heater */
+#define RO_LN2_VALVE        5       /* CH5: LN2 solenoid */
+#define RO_DOOR_LOCK        6       /* CH6: Door lock solenoid */
+#define RO_CHAMBER_LIGHT    7       /* CH7: Chamber lighting */
 
 /* Run state information for telemetry */
 typedef struct {

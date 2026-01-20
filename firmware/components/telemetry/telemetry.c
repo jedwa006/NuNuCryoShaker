@@ -44,7 +44,8 @@ static uint8_t build_controller_data(wire_controller_data_t *out, uint8_t max_co
 
     if (s_use_real_pid) {
         /* Get real data from PID controllers */
-        for (int i = 0; i < max_count && i < PID_MAX_CONTROLLERS; i++) {
+        uint8_t total_controllers = pid_controller_get_count();
+        for (int i = 0; i < max_count && i < total_controllers; i++) {
             pid_controller_t ctrl;
             if (pid_controller_get(i, &ctrl) == ESP_OK) {
                 if (ctrl.state == PID_STATE_ONLINE || ctrl.state == PID_STATE_STALE) {
@@ -79,6 +80,35 @@ static uint8_t build_controller_data(wire_controller_data_t *out, uint8_t max_co
     return 1;
 }
 
+/* Update alarm bits based on PID controller states */
+static void update_pid_alarm_bits(void)
+{
+    if (!s_use_real_pid) return;
+
+    /* Clear all PID fault bits first */
+    s_alarm_bits &= ~(ALARM_BIT_PID1_FAULT | ALARM_BIT_PID2_FAULT | ALARM_BIT_PID3_FAULT);
+
+    /* Check each controller for alarm/offline status */
+    uint8_t total_controllers = pid_controller_get_count();
+    for (int i = 0; i < total_controllers && i < 3; i++) {
+        pid_controller_t ctrl;
+        if (pid_controller_get(i, &ctrl) == ESP_OK) {
+            uint32_t fault_bit = 0;
+            switch (i) {
+                case 0: fault_bit = ALARM_BIT_PID1_FAULT; break;
+                case 1: fault_bit = ALARM_BIT_PID2_FAULT; break;
+                case 2: fault_bit = ALARM_BIT_PID3_FAULT; break;
+            }
+
+            /* Set fault bit if controller is offline or has alarm */
+            if (ctrl.state == PID_STATE_OFFLINE ||
+                ctrl.data.alarm1 || ctrl.data.alarm2) {
+                s_alarm_bits |= fault_bit;
+            }
+        }
+    }
+}
+
 static void telemetry_task(void *arg)
 {
     (void)arg;
@@ -103,13 +133,8 @@ static void telemetry_task(void *arg)
             s_alarm_bits &= ~ALARM_BIT_HMI_NOT_LIVE;
         }
 
-        /* Check for PID controller alarms - use individual fault bits */
-        if (s_use_real_pid && pid_controller_any_alarm()) {
-            /* Set a generic PID fault bit - could be extended to per-controller */
-            s_alarm_bits |= ALARM_BIT_PID1_FAULT;
-        } else {
-            s_alarm_bits &= ~(ALARM_BIT_PID1_FAULT | ALARM_BIT_PID2_FAULT | ALARM_BIT_PID3_FAULT);
-        }
+        /* Update PID controller alarm bits (per-controller) */
+        update_pid_alarm_bits();
 
         /* Only send telemetry if connected and subscribed */
         if (ble_gatt_is_connected() && ble_gatt_telemetry_subscribed()) {
@@ -146,6 +171,8 @@ static void telemetry_task(void *arg)
                 run_state.target_temp_x10 = info.target_temp_x10;
                 run_state.recipe_step = info.recipe_step;
                 run_state.interlock_bits = info.interlock_bits;
+                run_state.lazy_poll_active = pid_controller_is_lazy_polling() ? 1 : 0;
+                run_state.idle_timeout_min = pid_controller_get_idle_timeout();
 
                 frame_len = wire_build_telemetry_ext(
                     frame, sizeof(frame),
