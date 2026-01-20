@@ -14,6 +14,7 @@ set(EXCLUDE_COMPONENTS
     "relay_ctrl"    # Hardware control for main app
     "status_led"    # LED indicator (could add later if desired)
     "bootctl"       # Used by main app
+    "version"       # Versioning for main app only
 )
 
 set(SDKCONFIG_DEFAULTS

@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "fw_version.h"
 #include "bootctl.h"
 #include "ble_gatt.h"
 #include "telemetry.h"
@@ -13,6 +14,9 @@ static const char *TAG = "main_app";
 
 void app_main(void)
 {
+    // Log firmware version first thing
+    fw_version_log();
+
     // Initialize status LED first - show power on immediately
     esp_err_t ret = status_led_init();
     if (ret == ESP_OK) {

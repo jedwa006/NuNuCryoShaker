@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+#include "fw_version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,11 +36,8 @@ extern "C" {
 /* Device advertising name prefix */
 #define BLE_DEVICE_NAME_PREFIX  "SYS-CTRL-"
 
-/* Firmware version info for Device Info characteristic */
-#define FW_VERSION_MAJOR        0
-#define FW_VERSION_MINOR        1
-#define FW_VERSION_PATCH        0
-#define FW_BUILD_ID             0x00000001
+/* Note: FW_VERSION_MAJOR/MINOR/PATCH and FW_BUILD_ID are now
+ * defined in fw_version.h for centralized version management */
 
 /* Capability flags for Device Info */
 #define CAP_SUPPORTS_SESSION_LEASE  (1 << 0)
