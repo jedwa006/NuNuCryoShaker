@@ -1,10 +1,11 @@
 idf_component_register(
-    SRCS "app_main.c"
-    INCLUDE_DIRS "."
+    SRCS "ble_gatt.c"
+    INCLUDE_DIRS "include"
     PRIV_REQUIRES
+        bt
         nvs_flash
-        bootctl
-        ble_gatt
+        wire_protocol
+        session_mgr
         telemetry
         relay_ctrl
         status_led
