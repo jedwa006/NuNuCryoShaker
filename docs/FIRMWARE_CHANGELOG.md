@@ -47,3 +47,63 @@
 5. Clean flash: erase → recovery to factory → main_app to ota_0
 6. Verified LED states: cyan breathing (advertising) → green breathing (connected)
 7. Verified BLE communication with tablet app - all systems nominal
+8. Recovered from git pack file corruption via fresh clone workflow
+9. Created feature branch `feature/firmware-led-and-components` with clean history
+10. Verified fresh clone builds successfully (recovery: 799KB, main: 573KB)
+
+---
+
+## Git Best Practices for This Project
+
+### Branch Strategy
+- **main**: Stable, deployable code only. Protected branch.
+- **feature/\***: Feature development branches (e.g., `feature/firmware-led-and-components`)
+- **fix/\***: Bug fix branches
+- Always create PRs for merging to main; never push directly.
+
+### Commit Hygiene
+1. **Commit frequently**: Push after each logical unit of work completes
+2. **Atomic commits**: One feature/fix per commit when possible
+3. **Descriptive messages**: First line summarizes (50 chars), body explains why
+4. **Push regularly**: Don't accumulate local commits - push after each working state
+
+### Before Starting Work
+```bash
+git fetch origin
+git status                    # Check for uncommitted changes
+git pull origin main          # If on main
+```
+
+### During Development
+```bash
+# After each milestone:
+git add -A
+git commit -m "Brief description of change"
+git push origin <branch-name>
+```
+
+### Preventing Corruption
+- **Push often**: Remote serves as backup; local-only commits are vulnerable
+- **Avoid large binary files**: Use Git LFS if needed
+- **Clean builds**: Use `fullclean` before major operations to avoid stale artifacts
+- **Fresh clone test**: Periodically verify the repo builds from a fresh clone
+
+### Recovery from Corruption
+If you encounter pack file errors or "file truncated" messages:
+1. Clone fresh to a temporary location
+2. Copy uncommitted changes from corrupted repo
+3. Commit and push from the fresh clone
+4. Replace the corrupted local repo with the fresh one
+5. Preserve machine-specific files (e.g., `local.env`)
+
+### Pre-Session Checklist
+- [ ] `git status` - verify clean state
+- [ ] `git pull` - sync with remote
+- [ ] Check branch name matches intended work
+- [ ] Note current HEAD commit for reference
+
+### Post-Session Checklist
+- [ ] All changes committed with clear messages
+- [ ] Pushed to remote
+- [ ] Update changelog/roadmap if applicable
+- [ ] Create PR if feature is complete
