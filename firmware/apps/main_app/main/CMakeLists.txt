@@ -9,4 +9,6 @@ idf_component_register(
         telemetry
         relay_ctrl
         status_led
+        pid_controller
+        machine_state
 )

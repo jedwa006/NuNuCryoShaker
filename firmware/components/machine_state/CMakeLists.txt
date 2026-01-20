@@ -1,10 +1,13 @@
 idf_component_register(
-    SRCS "telemetry.c"
+    SRCS "machine_state.c"
     INCLUDE_DIRS "include"
     PRIV_REQUIRES
         esp_timer
-        wire_protocol
-        ble_gatt
+        driver
+        relay_ctrl
         session_mgr
+        telemetry
+        wire_protocol
         pid_controller
+        ble_gatt
 )

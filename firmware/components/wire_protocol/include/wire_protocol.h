@@ -37,10 +37,18 @@ typedef enum {
     CMD_SET_RELAY_MASK          = 0x0002,
     CMD_SET_SV                  = 0x0020,
     CMD_SET_MODE                = 0x0021,
+    CMD_REQUEST_PV_SV_REFRESH   = 0x0022,
+    CMD_REQUEST_SNAPSHOT_NOW    = 0x00F0,
+    CMD_CLEAR_WARNINGS          = 0x00F1,
+    CMD_CLEAR_LATCHED_ALARMS    = 0x00F2,
     CMD_OPEN_SESSION            = 0x0100,
     CMD_KEEPALIVE               = 0x0101,
     CMD_START_RUN               = 0x0102,
     CMD_STOP_RUN                = 0x0103,
+    CMD_ENABLE_SERVICE_MODE     = 0x0110,
+    CMD_DISABLE_SERVICE_MODE    = 0x0111,
+    CMD_CLEAR_ESTOP             = 0x0112,
+    CMD_CLEAR_FAULT             = 0x0113,
 } wire_cmd_id_t;
 
 /* Command ACK Status Codes */
@@ -62,6 +70,9 @@ typedef enum {
     EVENT_HMI_DISCONNECTED      = 0x1101,
     EVENT_RUN_STARTED           = 0x1200,
     EVENT_RUN_STOPPED           = 0x1201,
+    EVENT_RUN_ABORTED           = 0x1202,
+    EVENT_PRECOOL_COMPLETE      = 0x1203,
+    EVENT_STATE_CHANGED         = 0x1204,
     EVENT_RS485_DEVICE_ONLINE   = 0x1300,
     EVENT_RS485_DEVICE_OFFLINE  = 0x1301,
     EVENT_ALARM_LATCHED         = 0x1400,
@@ -103,7 +114,7 @@ typedef struct __attribute__((packed)) {
     uint16_t payload_len;
 } wire_frame_header_t;
 
-/* Telemetry snapshot payload */
+/* Telemetry snapshot payload (basic - backwards compatible) */
 typedef struct __attribute__((packed)) {
     uint32_t timestamp_ms;
     uint16_t di_bits;           // DI1..DI8 in bits 0..7
@@ -112,6 +123,16 @@ typedef struct __attribute__((packed)) {
     uint8_t  controller_count;  // 0..3
     // Followed by controller_count * controller_data_t
 } wire_telemetry_header_t;
+
+/* Extended telemetry with machine state (appended after controllers) */
+typedef struct __attribute__((packed)) {
+    uint8_t  machine_state;     // machine_state_t enum value
+    uint32_t run_elapsed_ms;    // Time since run started (0 if not running)
+    uint32_t run_remaining_ms;  // Time until run completes (0 if no target)
+    int16_t  target_temp_x10;   // Current target temperature × 10
+    uint8_t  recipe_step;       // Current recipe step (0-based)
+    uint8_t  interlock_bits;    // Which interlocks are blocking start
+} wire_telemetry_run_state_t;
 
 typedef struct __attribute__((packed)) {
     uint8_t  controller_id;     // 1, 2, or 3
@@ -221,6 +242,22 @@ size_t wire_build_telemetry(
     uint32_t alarm_bits,
     const wire_controller_data_t *controllers,
     uint8_t controller_count
+);
+
+/*
+ * Build a TELEMETRY_SNAPSHOT frame with extended machine state.
+ */
+size_t wire_build_telemetry_ext(
+    uint8_t *out_buf,
+    size_t out_buf_size,
+    uint16_t seq,
+    uint32_t timestamp_ms,
+    uint16_t di_bits,
+    uint16_t ro_bits,
+    uint32_t alarm_bits,
+    const wire_controller_data_t *controllers,
+    uint8_t controller_count,
+    const wire_telemetry_run_state_t *run_state
 );
 
 /*

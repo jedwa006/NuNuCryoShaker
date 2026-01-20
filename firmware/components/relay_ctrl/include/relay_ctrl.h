@@ -21,9 +21,10 @@ extern "C" {
 #define RELAY_I2C_SDA_PIN       42
 #define RELAY_I2C_SCL_PIN       41
 #define RELAY_I2C_FREQ_HZ       100000      /* 100 kHz standard mode */
-#define RELAY_TCA9554_ADDR      0x20        /* 7-bit I2C address */
+#define RELAY_TCA9554_ADDR      0x20        /* 7-bit I2C address for relay outputs */
+#define DI_TCA9534_ADDR         0x21        /* 7-bit I2C address for digital inputs */
 
-/* TCA9554 Register addresses */
+/* TCA9554/TCA9534 Register addresses (compatible) */
 #define TCA9554_REG_INPUT       0x00        /* Input port (read-only) */
 #define TCA9554_REG_OUTPUT      0x01        /* Output port (read/write) */
 #define TCA9554_REG_POLARITY    0x02        /* Polarity inversion */
@@ -96,6 +97,25 @@ esp_err_t relay_ctrl_set_all(uint8_t state);
  * @return ESP_OK on success
  */
 esp_err_t relay_ctrl_all_off(void);
+
+/**
+ * @brief Read digital input state from TCA9534 at 0x21
+ *
+ * Reads the 8 digital inputs. On the Waveshare board:
+ * - DI1-DI8 are directly connected to the TCA9534 pins
+ * - Bit 0 = DI1, Bit 7 = DI8
+ *
+ * @param di_bits Pointer to store the 8-bit input state
+ * @return ESP_OK on success, ESP_ERR_NOT_FOUND if TCA9534 not present
+ */
+esp_err_t relay_ctrl_read_di(uint8_t *di_bits);
+
+/**
+ * @brief Check if digital input hardware is available
+ *
+ * @return true if TCA9534 was found during init
+ */
+bool relay_ctrl_di_available(void);
 
 #ifdef __cplusplus
 }

@@ -15,6 +15,8 @@ set(EXCLUDE_COMPONENTS
     "status_led"    # LED indicator (could add later if desired)
     "bootctl"       # Used by main app
     "version"       # Versioning for main app only
+    "modbus_master" # RS-485/Modbus for main app
+    "pid_controller" # PID controller integration for main app
 )
 
 set(SDKCONFIG_DEFAULTS

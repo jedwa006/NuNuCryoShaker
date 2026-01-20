@@ -1,0 +1,11 @@
+menu "Telemetry Configuration"
+
+config TELEMETRY_USE_PID_CONTROLLER
+    bool "Enable PID controller integration"
+    default y
+    help
+        When enabled, telemetry will read real data from the pid_controller
+        component instead of using mock data. Requires the pid_controller
+        and modbus_master components to be available.
+
+endmenu

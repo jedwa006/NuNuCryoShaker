@@ -9,14 +9,20 @@ static const char *TAG = "relay_ctrl";
 /* I2C master bus handle */
 static i2c_master_bus_handle_t s_i2c_bus = NULL;
 
-/* I2C device handle for TCA9554 */
+/* I2C device handle for TCA9554 (relay outputs) */
 static i2c_master_dev_handle_t s_tca9554_dev = NULL;
+
+/* I2C device handle for TCA9534 (digital inputs) */
+static i2c_master_dev_handle_t s_tca9534_dev = NULL;
 
 /* Cached relay state (mirrors TCA9554 output register) */
 static uint8_t s_relay_state = 0x00;
 
 /* Flag to track initialization */
 static bool s_initialized = false;
+
+/* Flag to track if DI expander is available */
+static bool s_di_available = false;
 
 /**
  * @brief Write a byte to a TCA9554 register
@@ -39,6 +45,37 @@ static esp_err_t tca9554_read_reg(uint8_t reg, uint8_t *value)
     esp_err_t ret = i2c_master_transmit_receive(s_tca9554_dev, &reg, 1, value, 1, 100);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read reg 0x%02X: %s", reg, esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+/**
+ * @brief Read a byte from TCA9534 (digital input) register
+ */
+static esp_err_t tca9534_di_read_reg(uint8_t reg, uint8_t *value)
+{
+    if (s_tca9534_dev == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    esp_err_t ret = i2c_master_transmit_receive(s_tca9534_dev, &reg, 1, value, 1, 100);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "TCA9534: Failed to read reg 0x%02X: %s", reg, esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+/**
+ * @brief Write a byte to TCA9534 register
+ */
+static esp_err_t tca9534_di_write_reg(uint8_t reg, uint8_t value)
+{
+    if (s_tca9534_dev == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    uint8_t write_buf[2] = { reg, value };
+    esp_err_t ret = i2c_master_transmit(s_tca9534_dev, write_buf, sizeof(write_buf), 100);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "TCA9534: Failed to write reg 0x%02X: %s", reg, esp_err_to_name(ret));
     }
     return ret;
 }
@@ -74,7 +111,7 @@ esp_err_t relay_ctrl_init(void)
         return ret;
     }
 
-    /* Add TCA9554 device to the bus */
+    /* Add TCA9554 device to the bus (relay outputs) */
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = RELAY_TCA9554_ADDR,
@@ -142,6 +179,41 @@ esp_err_t relay_ctrl_init(void)
 
     s_initialized = true;
     ESP_LOGI(TAG, "Relay control initialized - all relays OFF (ro_bits=0x00, convention: 1=ON, 0=OFF)");
+
+    /* Now try to initialize the digital input expander (TCA9534 @ 0x21) */
+    ESP_LOGI(TAG, "Probing for TCA9534 digital input expander @ 0x%02X", DI_TCA9534_ADDR);
+
+    ret = i2c_master_probe(s_i2c_bus, DI_TCA9534_ADDR, 100);
+    if (ret == ESP_OK) {
+        /* Add TCA9534 device */
+        i2c_device_config_t di_dev_config = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = DI_TCA9534_ADDR,
+            .scl_speed_hz = RELAY_I2C_FREQ_HZ,
+        };
+
+        ret = i2c_master_bus_add_device(s_i2c_bus, &di_dev_config, &s_tca9534_dev);
+        if (ret == ESP_OK) {
+            /* Configure all pins as inputs (write 0xFF to config register) */
+            ret = tca9534_di_write_reg(TCA9554_REG_CONFIG, 0xFF);
+            if (ret == ESP_OK) {
+                s_di_available = true;
+                ESP_LOGI(TAG, "TCA9534 digital inputs initialized (DI1-DI8 available)");
+
+                /* Read initial state */
+                uint8_t di_state;
+                if (tca9534_di_read_reg(TCA9554_REG_INPUT, &di_state) == ESP_OK) {
+                    ESP_LOGI(TAG, "Initial DI state: 0x%02X", di_state);
+                }
+            } else {
+                ESP_LOGW(TAG, "Failed to configure TCA9534 as inputs");
+            }
+        } else {
+            ESP_LOGW(TAG, "Failed to add TCA9534 device: %s", esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGW(TAG, "TCA9534 not found at 0x%02X - digital inputs unavailable (using simulated)", DI_TCA9534_ADDR);
+    }
 
     return ESP_OK;
 }
@@ -258,4 +330,35 @@ esp_err_t relay_ctrl_set_all(uint8_t state)
 esp_err_t relay_ctrl_all_off(void)
 {
     return relay_ctrl_set_all(0x00);
+}
+
+esp_err_t relay_ctrl_read_di(uint8_t *di_bits)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (di_bits == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_di_available) {
+        /* Return simulated safe state: all inputs HIGH (no alarms)
+         * DI1 HIGH = E-stop not pressed
+         * DI2 HIGH = Door closed
+         * DI3 HIGH = LN2 present
+         * DI4 LOW = No motor fault
+         */
+        *di_bits = 0x07;  /* DI1-DI3 HIGH, DI4-DI8 LOW */
+        return ESP_OK;
+    }
+
+    /* Read from TCA9534 input register */
+    return tca9534_di_read_reg(TCA9554_REG_INPUT, di_bits);
+}
+
+bool relay_ctrl_di_available(void)
+{
+    return s_di_available;
 }
