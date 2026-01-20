@@ -475,18 +475,20 @@ static void transition_to(machine_state_t new_state)
             /* Heaters controlled by PID - enable them */
             relay_ctrl_set(RO_HEATER_1, RELAY_STATE_ON);
             relay_ctrl_set(RO_HEATER_2, RELAY_STATE_ON);
-            telemetry_set_ro_bits(relay_ctrl_get_state());
-            break;
-
-        case MACHINE_STATE_RUNNING:
-            /* Enable motor contactor */
+            /* Energize motor circuit (contactor + soft starter power) but don't start yet */
             relay_ctrl_set(RO_MAIN_CONTACTOR, RELAY_STATE_ON);
             telemetry_set_ro_bits(relay_ctrl_get_state());
             break;
 
+        case MACHINE_STATE_RUNNING:
+            /* Trigger soft starter to start motor */
+            relay_ctrl_set(RO_MOTOR_START, RELAY_STATE_ON);
+            telemetry_set_ro_bits(relay_ctrl_get_state());
+            break;
+
         case MACHINE_STATE_STOPPING:
-            /* Disable motor, keep cooling for soak */
-            relay_ctrl_set(RO_MAIN_CONTACTOR, RELAY_STATE_OFF);
+            /* Stop motor via soft starter (contactor stays on during soak) */
+            relay_ctrl_set(RO_MOTOR_START, RELAY_STATE_OFF);
             relay_ctrl_set(RO_HEATER_1, RELAY_STATE_OFF);
             relay_ctrl_set(RO_HEATER_2, RELAY_STATE_OFF);
             /* Keep door locked and LN2 off during soak */
@@ -541,7 +543,8 @@ static void set_outputs_safe(void)
     ESP_LOGI(TAG, "Setting outputs to safe state");
 
     /* Turn off all relays except chamber light (user preference) */
-    relay_ctrl_set(RO_MAIN_CONTACTOR, RELAY_STATE_OFF);
+    relay_ctrl_set(RO_MOTOR_START, RELAY_STATE_OFF);    /* Stop motor first */
+    relay_ctrl_set(RO_MAIN_CONTACTOR, RELAY_STATE_OFF); /* Then kill power circuit */
     relay_ctrl_set(RO_HEATER_1, RELAY_STATE_OFF);
     relay_ctrl_set(RO_HEATER_2, RELAY_STATE_OFF);
     relay_ctrl_set(RO_LN2_VALVE, RELAY_STATE_OFF);

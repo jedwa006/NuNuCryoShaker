@@ -24,15 +24,15 @@ extern "C" {
  * ============================================================================ */
 
 #define FW_VERSION_MAJOR        0
-#define FW_VERSION_MINOR        2
-#define FW_VERSION_PATCH        0
+#define FW_VERSION_MINOR        3
+#define FW_VERSION_PATCH        6
 
 /**
  * Build ID - can be set by CI or manually incremented
  * Format: 0xYYMMDDNN where NN is build number for that day
- * Example: 0x26011901 = 2026-01-19, build 1
+ * Example: 0x26012001 = 2026-01-20, build 1
  */
-#define FW_BUILD_ID             0x26011901
+#define FW_BUILD_ID             0x26012007
 
 /* ============================================================================
  * DERIVED VERSION STRINGS AND MACROS
