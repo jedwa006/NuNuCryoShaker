@@ -199,8 +199,11 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
     ESP_LOGI(TAG, "Command: cmd_id=0x%04X seq=%u payload_len=%u",
              cmd_id, header.seq, (unsigned)cmd_payload_len);
 
-    /* Signal activity to reset lazy polling timer */
-    pid_controller_signal_activity();
+    /* Signal activity to reset lazy polling timer (but NOT for KEEPALIVE,
+     * which is sent automatically and shouldn't prevent idle timeout) */
+    if (cmd_id != CMD_KEEPALIVE) {
+        pid_controller_signal_activity();
+    }
 
     switch (cmd_id) {
         case CMD_OPEN_SESSION: {

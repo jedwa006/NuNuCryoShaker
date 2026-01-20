@@ -51,14 +51,14 @@ typedef enum {
 #define INTERLOCK_BIT_ESTOP         (1 << 0)    /* E-stop active (DI1 LOW) */
 #define INTERLOCK_BIT_DOOR_OPEN     (1 << 1)    /* Door open (DI2 LOW) */
 #define INTERLOCK_BIT_LN2_ABSENT    (1 << 2)    /* LN2 not present (DI3 LOW) - warning only */
-#define INTERLOCK_BIT_MOTOR_FAULT   (1 << 3)    /* VFD fault (DI4 HIGH) */
+#define INTERLOCK_BIT_MOTOR_FAULT   (1 << 3)    /* Reserved - future accelerometer fault detection */
 #define INTERLOCK_BIT_HMI_STALE     (1 << 4)    /* HMI session not live */
 
 /* Digital Input Channels (1-based indexing to match hardware labels) */
 #define DI_ESTOP            1       /* DI1: E-Stop (LOW = active) */
 #define DI_DOOR_CLOSED      2       /* DI2: Door position (HIGH = closed) */
 #define DI_LN2_PRESENT      3       /* DI3: LN2 supply (HIGH = present) */
-#define DI_MOTOR_FAULT      4       /* DI4: VFD fault (HIGH = fault) */
+#define DI_MOTOR_FAULT      4       /* DI4: Reserved - soft starter has no fault output */
 
 /* Relay Output Channels (1-based indexing to match hardware labels) */
 #define RO_MAIN_CONTACTOR   1       /* CH1: Motor circuit power (contactor + soft starter) */

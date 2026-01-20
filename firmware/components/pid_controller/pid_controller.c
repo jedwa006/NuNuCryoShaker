@@ -64,7 +64,11 @@ static void poll_controller(pid_controller_t *ctrl)
         ctrl->error_count++;
         ctrl->total_errors++;
 
-        if (ctrl->error_count >= 3) {
+        /* In lazy mode, be more tolerant of errors before going offline
+         * (slower poll rate means occasional errors are more visible) */
+        uint8_t offline_threshold = s_lazy_polling_active ? 6 : 3;
+
+        if (ctrl->error_count >= offline_threshold) {
             if (ctrl->state == PID_STATE_ONLINE || ctrl->state == PID_STATE_STALE) {
                 ESP_LOGW(TAG, "Controller %d went offline: %s",
                          ctrl->addr, modbus_err_str(err));
@@ -167,9 +171,14 @@ static void poll_task(void *arg)
         /* Move to next controller (round-robin) */
         current_idx = (current_idx + 1) % s_config.count;
 
-        /* Check for stale data on other controllers */
+        /* Check for stale data on other controllers
+         * In lazy mode, be more lenient since polls are less frequent.
+         * With N controllers at 2000ms intervals, each is polled every N*2000ms.
+         * Add margin to prevent flickering between states. */
         uint32_t now = get_time_ms();
-        uint32_t stale_threshold = is_lazy ? (PID_POLL_INTERVAL_SLOW_MS * 3) : PID_STALE_THRESHOLD_MS;
+        uint32_t stale_threshold = is_lazy
+            ? (PID_POLL_INTERVAL_SLOW_MS * (s_config.count + 2))  /* Extra margin in lazy mode */
+            : PID_STALE_THRESHOLD_MS;
         for (int i = 0; i < s_config.count; i++) {
             if (s_controllers[i].state == PID_STATE_ONLINE) {
                 uint32_t age = now - s_controllers[i].last_update_ms;

@@ -190,9 +190,12 @@ uint8_t machine_state_get_interlocks(void)
     if (!check_ln2_present()) {
         interlocks |= INTERLOCK_BIT_LN2_ABSENT;
     }
-    if (check_motor_fault()) {
-        interlocks |= INTERLOCK_BIT_MOTOR_FAULT;
-    }
+    /* Motor fault check disabled - soft starter has no fault output.
+     * INTERLOCK_BIT_MOTOR_FAULT reserved for future accelerometer-based detection.
+     * if (check_motor_fault()) {
+     *     interlocks |= INTERLOCK_BIT_MOTOR_FAULT;
+     * }
+     */
     if (!session_mgr_is_live()) {
         interlocks |= INTERLOCK_BIT_HMI_STALE;
     }
@@ -202,10 +205,11 @@ uint8_t machine_state_get_interlocks(void)
 
 bool machine_state_start_allowed(void)
 {
-    /* Interlocks that block start (LN2 absence is warning only) */
+    /* Interlocks that block start (LN2 absence is warning only)
+     * Note: MOTOR_FAULT removed - soft starter has no fault output.
+     * Can be re-added when accelerometer-based fault detection is implemented. */
     uint8_t blocking_interlocks = INTERLOCK_BIT_ESTOP |
                                    INTERLOCK_BIT_DOOR_OPEN |
-                                   INTERLOCK_BIT_MOTOR_FAULT |
                                    INTERLOCK_BIT_HMI_STALE;
 
     uint8_t interlocks = machine_state_get_interlocks();
@@ -585,8 +589,11 @@ static bool check_door_open(void)
 
 static bool check_motor_fault(void)
 {
-    /* Motor fault is active-HIGH: DI4 HIGH = fault */
-    return (s_di_bits & (1 << (DI_MOTOR_FAULT - 1))) != 0;
+    /* Motor fault check disabled - soft starter has no fault output signal.
+     * DI4 is reserved for future use if we add a VFD with fault output.
+     * Always returns false (no fault) for now. */
+    (void)DI_MOTOR_FAULT;  /* Suppress unused warning */
+    return false;
 }
 
 static bool check_ln2_present(void)

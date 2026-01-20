@@ -279,7 +279,7 @@ size_t wire_build_telemetry_ext(
         payload[offset++] = (c->age_ms >> 8) & 0xFF;
     }
 
-    // Append extended run state if provided
+    // Append extended run state if provided (16 bytes total)
     if (run_state != NULL) {
         payload[offset++] = run_state->machine_state;
 
@@ -298,6 +298,9 @@ size_t wire_build_telemetry_ext(
 
         payload[offset++] = run_state->recipe_step;
         payload[offset++] = run_state->interlock_bits;
+        payload[offset++] = run_state->lazy_poll_active;
+        payload[offset++] = run_state->idle_timeout_min;
+        payload[offset++] = run_state->reserved;  // offset 15 - padding to 16 bytes
     }
 
     return wire_build_frame(out_buf, out_buf_size, MSG_TYPE_TELEMETRY_SNAPSHOT, seq, payload, offset);
