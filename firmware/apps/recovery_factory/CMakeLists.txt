@@ -7,16 +7,18 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components")
 # Exclude components that have heavy dependencies (BLE, etc.)
 # Recovery app is a minimal OTA portal and doesn't need these
 set(EXCLUDE_COMPONENTS
-    "ble_gatt"      # Requires NimBLE
-    "session_mgr"   # Depends on BLE
-    "wire_protocol" # Used by main app BLE
-    "telemetry"     # Used by main app
-    "relay_ctrl"    # Hardware control for main app
-    "status_led"    # LED indicator (could add later if desired)
-    "bootctl"       # Used by main app
-    "version"       # Versioning for main app only
-    "modbus_master" # RS-485/Modbus for main app
+    "ble_gatt"       # Requires NimBLE
+    "session_mgr"    # Depends on BLE
+    "wire_protocol"  # Used by main app BLE
+    "telemetry"      # Used by main app
+    "relay_ctrl"     # Hardware control for main app
+    "status_led"     # LED indicator (could add later if desired)
+    "bootctl"        # Used by main app
+    "version"        # Versioning for main app only
+    "modbus_master"  # RS-485/Modbus for main app
     "pid_controller" # PID controller integration for main app
+    "machine_state"  # State machine depends on ble_gatt
+    "safety_gate"    # Safety gate framework depends on machine_state
 )
 
 set(SDKCONFIG_DEFAULTS
