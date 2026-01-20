@@ -3,6 +3,7 @@
 #include "ble_gatt.h"
 #include "session_mgr.h"
 #include "pid_controller.h"
+#include "safety_gate.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -109,6 +110,46 @@ static void update_pid_alarm_bits(void)
     }
 }
 
+/* Update alarm bits for safety gate status (probe errors, gate bypasses) */
+static void update_safety_gate_alarm_bits(void)
+{
+    /* Clear safety gate alarm bits first */
+    s_alarm_bits &= ~(ALARM_BIT_GATE_DOOR_BYPASSED |
+                      ALARM_BIT_GATE_HMI_BYPASSED |
+                      ALARM_BIT_GATE_PID_BYPASSED |
+                      ALARM_BIT_PID1_PROBE_ERROR |
+                      ALARM_BIT_PID2_PROBE_ERROR |
+                      ALARM_BIT_PID3_PROBE_ERROR);
+
+    /* Check gate bypass status */
+    if (!safety_gate_is_enabled(GATE_DOOR_CLOSED)) {
+        s_alarm_bits |= ALARM_BIT_GATE_DOOR_BYPASSED;
+    }
+    if (!safety_gate_is_enabled(GATE_HMI_LIVE)) {
+        s_alarm_bits |= ALARM_BIT_GATE_HMI_BYPASSED;
+    }
+    if (!safety_gate_is_enabled(GATE_PID1_ONLINE) ||
+        !safety_gate_is_enabled(GATE_PID2_ONLINE) ||
+        !safety_gate_is_enabled(GATE_PID3_ONLINE) ||
+        !safety_gate_is_enabled(GATE_PID1_NO_PROBE_ERR) ||
+        !safety_gate_is_enabled(GATE_PID2_NO_PROBE_ERR) ||
+        !safety_gate_is_enabled(GATE_PID3_NO_PROBE_ERR)) {
+        s_alarm_bits |= ALARM_BIT_GATE_PID_BYPASSED;
+    }
+
+    /* Check probe error status */
+    uint8_t probe_errors = safety_gate_get_probe_error_flags();
+    if (probe_errors & (1 << 0)) {
+        s_alarm_bits |= ALARM_BIT_PID1_PROBE_ERROR;
+    }
+    if (probe_errors & (1 << 1)) {
+        s_alarm_bits |= ALARM_BIT_PID2_PROBE_ERROR;
+    }
+    if (probe_errors & (1 << 2)) {
+        s_alarm_bits |= ALARM_BIT_PID3_PROBE_ERROR;
+    }
+}
+
 static void telemetry_task(void *arg)
 {
     (void)arg;
@@ -135,6 +176,9 @@ static void telemetry_task(void *arg)
 
         /* Update PID controller alarm bits (per-controller) */
         update_pid_alarm_bits();
+
+        /* Update safety gate alarm bits (probe errors, gate bypasses) */
+        update_safety_gate_alarm_bits();
 
         /* Only send telemetry if connected and subscribed */
         if (ble_gatt_is_connected() && ble_gatt_telemetry_subscribed()) {

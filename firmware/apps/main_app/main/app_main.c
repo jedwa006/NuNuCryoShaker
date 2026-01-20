@@ -11,6 +11,7 @@
 #include "status_led.h"
 #include "pid_controller.h"
 #include "machine_state.h"
+#include "safety_gate.h"
 
 static const char *TAG = "main_app";
 
@@ -102,6 +103,16 @@ void app_main(void)
         telemetry_use_real_pid(true);
     } else {
         ESP_LOGW(TAG, "PID controller init failed: %s - using mock data",
+                 esp_err_to_name(ret));
+    }
+
+    // Initialize safety gate framework (loads capabilities from NVS)
+    // Must be initialized after NVS and PID controller, before machine_state
+    ret = safety_gate_init();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Safety gate framework initialized");
+    } else {
+        ESP_LOGW(TAG, "Safety gate init failed: %s - using defaults",
                  esp_err_to_name(ret));
     }
 
