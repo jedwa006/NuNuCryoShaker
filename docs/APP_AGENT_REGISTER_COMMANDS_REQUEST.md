@@ -50,10 +50,10 @@ Full command specifications are in:
 
 | File | Changes Needed |
 |------|----------------|
-| `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/wire_protocol/include/wire_protocol.h` | Add CMD_READ_REGISTERS (0x0030) and CMD_WRITE_REGISTER (0x0031) defines |
-| `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/ble_gatt/ble_gatt.c` | Add case handlers in command dispatch |
-| `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/pid_controller/pid_controller.c` | May need to add/expose register read/write functions |
-| `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/docs/90-command-catalog.md` | Document the new commands |
+| `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/wire_protocol/include/wire_protocol.h` | Add CMD_READ_REGISTERS (0x0030) and CMD_WRITE_REGISTER (0x0031) defines |
+| `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/ble_gatt/ble_gatt.c` | Add case handlers in command dispatch |
+| `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/pid_controller/pid_controller.c` | May need to add/expose register read/write functions |
+| `/Users/joshuaedwards/Projects/NuNuCryoShaker/docs/90-command-catalog.md` | Document the new commands |
 
 ---
 

@@ -176,10 +176,10 @@ Once firmware implements SET_LAZY_POLLING, the app needs:
 
 | Component | Absolute Path |
 |-----------|---------------|
-| PID Controller | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/pid_controller/pid_controller.c` |
-| BLE GATT | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/ble_gatt/ble_gatt.c` |
-| Wire Protocol | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/wire_protocol/include/wire_protocol.h` |
-| Machine State | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/machine_state/machine_state.c` |
+| PID Controller | `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/pid_controller/pid_controller.c` |
+| BLE GATT | `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/ble_gatt/ble_gatt.c` |
+| Wire Protocol | `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/wire_protocol/include/wire_protocol.h` |
+| Machine State | `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/machine_state/machine_state.c` |
 | NVS Storage | Use `nvs_flash` component |
 
 ---

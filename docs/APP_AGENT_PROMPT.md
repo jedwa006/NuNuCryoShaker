@@ -175,9 +175,9 @@ After making changes, verify:
 ## Reference Documentation
 
 Full details in the firmware repository:
-- `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/docs/APP_AGENT_HANDOFF.md`
-- `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/docs/90-command-catalog.md`
-- `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/docs/SAFETY_GATE_FRAMEWORK.md`
+- `/Users/joshuaedwards/Projects/NuNuCryoShaker/docs/APP_AGENT_HANDOFF.md`
+- `/Users/joshuaedwards/Projects/NuNuCryoShaker/docs/90-command-catalog.md`
+- `/Users/joshuaedwards/Projects/NuNuCryoShaker/docs/SAFETY_GATE_FRAMEWORK.md`
 
 App repository:
 - `/Users/joshuaedwards/Downloads/claudeShakerControl/`
