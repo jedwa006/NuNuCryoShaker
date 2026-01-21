@@ -44,6 +44,27 @@ Compute CRC over:
   - ...
   - bit7 = channel 8
 
+### Digital Input Mapping (di_bits)
+| DI | Bit | Name | Function | Active State |
+|---:|---:|---|---|---|
+| 1 | 0 | ESTOP | E-Stop button | LOW = active (normally closed) |
+| 2 | 1 | DOOR_CLOSED | Door position sensor | HIGH = closed, LOW = open |
+| 3 | 2 | LN2_PRESENT | LN2 supply sensor | HIGH = present |
+| 4 | 3 | MOTOR_FAULT | Reserved (soft starter has no output) | - |
+| 5-8 | 4-7 | - | Unused | - |
+
+### Relay Output Mapping (ro_bits)
+| CH | Bit | Name | Function | Notes |
+|---:|---:|---|---|---|
+| 1 | 0 | MAIN_CONTACTOR | Motor circuit power | Contactor + soft starter |
+| 2 | 1 | MOTOR_START | Soft starter START | Triggers soft starter |
+| 3 | 2 | HEATER_1 | Axle bearing heater | PID2 controlled |
+| 4 | 3 | HEATER_2 | Orbital bearing heater | PID3 controlled |
+| 5 | 4 | LN2_VALVE | LN2 solenoid | PID1 controlled (chilldown) |
+| 6 | 5 | DOOR_LOCK | Door lock solenoid | Locked during run |
+| 7 | 6 | CHAMBER_LIGHT | Chamber lighting | User toggle |
+| 8 | 7 | - | Unused | - |
+
 ---
 
 ## 2) Message types (msg_type)
@@ -179,6 +200,44 @@ Controller mode encoding (generic; map as needed):
 - 2 = AUTO
 - 3 = PROGRAM
 
+#### Safety gate configuration (v0.4+)
+| cmd_id | Name | Payload |
+|---:|---|---|
+| 0x0070 | GET_CAPABILITIES | none |
+| 0x0071 | SET_CAPABILITY | `subsystem_id(u8)`, `capability(u8)` |
+| 0x0072 | GET_SAFETY_GATES | none |
+| 0x0073 | SET_SAFETY_GATE | `gate_id(u8)`, `enabled(u8)` |
+
+**Subsystem IDs:**
+- 0 = PID1 (LN2/Cold)
+- 1 = PID2 (Axle bearings)
+- 2 = PID3 (Orbital bearings)
+- 3 = DI1 (E-Stop) - always REQUIRED, cannot be changed
+- 4 = DI2 (Door sensor)
+- 5 = DI3 (LN2 present)
+- 6 = DI4 (Motor fault)
+
+**Capability levels:**
+- 0 = NOT_PRESENT (ignore completely)
+- 1 = OPTIONAL (faults generate warnings, don't block)
+- 2 = REQUIRED (faults block operations)
+
+**Gate IDs:**
+- 0 = ESTOP (cannot be bypassed)
+- 1 = DOOR_CLOSED
+- 2 = HMI_LIVE
+- 3 = PID1_ONLINE
+- 4 = PID2_ONLINE
+- 5 = PID3_ONLINE
+- 6 = PID1_NO_PROBE_ERR
+- 7 = PID2_NO_PROBE_ERR
+- 8 = PID3_NO_PROBE_ERR
+
+**Notes:**
+- Capability levels persist to NVS (survive reboots)
+- Gate bypasses do NOT persist (reset to enabled on reboot for safety)
+- E-Stop gate (ID 0) can never be bypassed
+
 #### Maintenance / diagnostics (optional in v0)
 | cmd_id | Name | Payload |
 |---:|---|---|
@@ -275,7 +334,7 @@ Critical events (ESTOP_ASSERTED, RUN_ABORTED, STATE_CHANGED to E_STOP/FAULT) mus
 
 ## 7) Alarm bitfield (alarm_bits u32)
 
-Bit allocations (initial proposal; adjust to your system):
+Bit allocations:
 - bit0: ESTOP_ACTIVE
 - bit1: DOOR_INTERLOCK_OPEN
 - bit2: OVER_TEMP
@@ -285,7 +344,13 @@ Bit allocations (initial proposal; adjust to your system):
 - bit6: PID1_FAULT
 - bit7: PID2_FAULT
 - bit8: PID3_FAULT
-- bits9..31: reserved
+- bit9: GATE_DOOR_BYPASSED (door safety gate bypassed)
+- bit10: GATE_HMI_BYPASSED (HMI liveness gate bypassed)
+- bit11: GATE_PID_BYPASSED (any PID online/probe gate bypassed)
+- bit12: PID1_PROBE_ERROR (HHHH/LLLL detected)
+- bit13: PID2_PROBE_ERROR (HHHH/LLLL detected)
+- bit14: PID3_PROBE_ERROR (HHHH/LLLL detected)
+- bits15..31: reserved
 
 ---
 

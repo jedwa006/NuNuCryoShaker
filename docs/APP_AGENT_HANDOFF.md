@@ -1,258 +1,286 @@
-# App Agent Handoff - Lazy Polling Telemetry + Alarm Architecture
+# App Agent Handoff - Safety Gate Framework & Current MCU State
 
 **Date**: 2026-01-20
-**Firmware Branch**: `feature/pid-hmi-integration`
-**Firmware Version**: 0.3.4 (build 0x26012005)
-**Flashed to**: ota_0 partition
+**Firmware Version**: v0.4.0 (build 0x26012001)
+**Firmware Branch**: `main` (merged from `feature/pid-hmi-integration`)
+**Status**: MCU implementation complete, ready for app integration
 
 ---
 
 ## Summary
 
-Two items for app-side integration:
+Firmware v0.4.0 introduces the **Safety Gate Framework** - a configurable system for managing operational safety based on subsystem capabilities and runtime gate checks. This handoff covers:
 
-1. **Lazy polling state now in telemetry** - MCU reports configuration in every packet
-2. **Alarm handling architecture** - MCU reports real-time state; app handles history/latching
-
----
-
-## Part 1: Lazy Polling Telemetry (NEW in v0.3.4)
-
-### New Telemetry Fields
-
-The `wire_telemetry_run_state_t` structure now includes:
-
-| Offset | Field | Type | Description |
-|--------|-------|------|-------------|
-| +13 | `lazy_poll_active` | u8 | 1 = lazy polling active, 0 = fast polling |
-| +14 | `idle_timeout_min` | u8 | Configured idle timeout in minutes (0 = disabled) |
-
-**Full `wire_telemetry_run_state_t` structure (16 bytes):**
-```
-| machine_state (u8)     | offset 0  |
-| run_elapsed_ms (u32)   | offset 1  |
-| run_remaining_ms (u32) | offset 5  |
-| target_temp_x10 (i16)  | offset 9  |
-| recipe_step (u8)       | offset 11 |
-| interlock_bits (u8)    | offset 12 |
-| lazy_poll_active (u8)  | offset 13 |  <-- NEW
-| idle_timeout_min (u8)  | offset 14 |  <-- NEW
-```
-
-### MCU as Source of Truth
-
-The MCU stores the idle timeout in NVS (persists across reboots). The app should:
-
-1. **On first connect:**
-   - Read `idle_timeout_min` from the first telemetry packet
-   - Update local UI to reflect MCU's current setting
-   - If app has a different desired value, send `CMD_SET_IDLE_TIMEOUT`
-
-2. **When user changes timeout in app:**
-   - Send `CMD_SET_IDLE_TIMEOUT (0x0040)` with new value
-   - Wait for ACK (status OK confirms NVS write succeeded)
-   - Verify by checking next telemetry packet's `idle_timeout_min`
-
-3. **Displaying lazy mode status:**
-   - Use `lazy_poll_active` to show current polling mode
-   - Changes automatically based on activity timer
-
-### Why MCU Might "Default to 5 Minutes"
-
-If the app never sends `CMD_SET_IDLE_TIMEOUT` after connecting, the MCU uses its stored value (or default of 5 minutes if NVS is empty). The app should query the telemetry and update if needed.
+1. **New safety gate BLE commands** (0x0070-0x0073)
+2. **Extended alarm_bits** (bits 9-14 for gate bypasses and probe errors)
+3. **Hardware I/O mappings** (DI and RO channels for UI visualization)
+4. **Integration tasks** for the app
 
 ---
 
-## Part 2: Alarm Architecture
+## Part 1: Hardware I/O Mappings
 
-### How MCU Alarms Work
+### Digital Inputs (di_bits)
 
-The MCU reports alarms via **two separate mechanisms**:
+These are the physical inputs from sensors - update your UI visualization to match.
 
-#### 1. Telemetry `alarm_bits` (u32) - Real-time State
+| DI | Bit | Constant | Function | Active State |
+|---:|---:|---|---|---|
+| 1 | 0 | `ESTOP` | E-Stop button | LOW = active (normally closed) |
+| 2 | 1 | `DOOR_CLOSED` | Door position sensor | HIGH = closed, LOW = open |
+| 3 | 2 | `LN2_PRESENT` | LN2 supply sensor | HIGH = present |
+| 4 | 3 | `MOTOR_FAULT` | Reserved (soft starter has no output) | - |
+| 5-8 | 4-7 | - | Unused | - |
 
-**Sent:** Every telemetry packet (10 Hz)
-**Behavior:** Reports **current** conditions - NOT latched
+**App UI should show:**
+- DI1 (bit 0): E-Stop indicator - RED when active (bit=0)
+- DI2 (bit 1): Door status - GREEN when closed (bit=1), YELLOW/RED when open (bit=0)
+- DI3 (bit 2): LN2 presence - BLUE/GREEN when present (bit=1)
 
-```c
-ALARM_BIT_ESTOP_ACTIVE   = 0x0001  // E-stop currently pressed
-ALARM_BIT_DOOR_INTERLOCK = 0x0002  // Door currently open during run
-ALARM_BIT_OVER_TEMP      = 0x0004  // Over-temperature condition
-ALARM_BIT_RS485_FAULT    = 0x0008  // RS-485 communication fault
-ALARM_BIT_POWER_FAULT    = 0x0010  // Power supply fault
-ALARM_BIT_HMI_NOT_LIVE   = 0x0020  // Session expired/stale
-ALARM_BIT_PID1_FAULT     = 0x0040  // PID controller 1 offline/alarm
-ALARM_BIT_PID2_FAULT     = 0x0080  // PID controller 2 offline/alarm
-ALARM_BIT_PID3_FAULT     = 0x0100  // PID controller 3 offline/alarm
+### Relay Outputs (ro_bits)
+
+These are the relay channels - update your UI toggles and indicators.
+
+| CH | Bit | Constant | Function | Notes |
+|---:|---:|---|---|---|
+| 1 | 0 | `MAIN_CONTACTOR` | Motor circuit power | Contactor + soft starter |
+| 2 | 1 | `MOTOR_START` | Soft starter START | Triggers soft starter |
+| 3 | 2 | `HEATER_1` | Axle bearing heater | PID2 controlled |
+| 4 | 3 | `HEATER_2` | Orbital bearing heater | PID3 controlled |
+| 5 | 4 | `LN2_VALVE` | LN2 solenoid | PID1 controlled (chilldown) |
+| 6 | 5 | `DOOR_LOCK` | Door lock solenoid | Locked during run |
+| 7 | 6 | `CHAMBER_LIGHT` | Chamber lighting | User toggle |
+| 8 | 7 | - | Unused | - |
+
+**App channel constants should be:**
+```kotlin
+const val LIGHT_RELAY_CHANNEL = 7        // CH7 = Chamber light
+const val DOOR_LOCK_RELAY_CHANNEL = 6    // CH6 = Door lock
+const val LN2_VALVE_CHANNEL = 5          // CH5 = LN2 solenoid (chilldown)
 ```
 
-**Key Point:** These bits **clear automatically** when the condition resolves.
+---
 
-#### 2. Events - One-shot Notifications
+## Part 2: Safety Gate Framework (NEW in v0.4.0)
 
-**Sent:** When state transitions occur (E-stop pressed, run started, etc.)
-**Behavior:** Fire once per transition, include severity level
+### Concepts
 
-```c
-EVENT_ESTOP_ASSERTED    = 0x1001  // E-stop engaged
-EVENT_ESTOP_CLEARED     = 0x1002  // E-stop released
-EVENT_RUN_STARTED       = 0x1200
-EVENT_RUN_STOPPED       = 0x1201
-EVENT_RUN_ABORTED       = 0x1202  // Run terminated by fault
-EVENT_STATE_CHANGED     = 0x1204  // Generic state change
+**Capability Levels** - Configurable per subsystem, persists to NVS:
+| Level | Value | Behavior |
+|-------|-------|----------|
+| NOT_PRESENT | 0 | Ignore completely - no gates checked |
+| OPTIONAL | 1 | Faults generate warnings, don't block operations |
+| REQUIRED | 2 | Faults block START_RUN, may trigger FAULT during run |
+
+**Safety Gates** - Runtime conditions checked before/during operations:
+- Gates can be ENABLED (checked) or BYPASSED (skipped) for development
+- **E-Stop gate (ID 0) can NEVER be bypassed** - hardware safety requirement
+- Gate bypasses reset on reboot (do not persist to NVS)
+
+### Subsystem IDs
+
+| ID | Subsystem | Default Capability |
+|---:|-----------|-------------------|
+| 0 | PID1 (LN2/Cold) | OPTIONAL |
+| 1 | PID2 (Axle bearings) | REQUIRED |
+| 2 | PID3 (Orbital bearings) | REQUIRED |
+| 3 | DI1 (E-Stop) | REQUIRED (immutable) |
+| 4 | DI2 (Door sensor) | REQUIRED |
+| 5 | DI3 (LN2 present) | OPTIONAL |
+| 6 | DI4 (Motor fault) | NOT_PRESENT |
+
+### Gate IDs
+
+| ID | Gate | Blocks | Can Bypass? |
+|---:|------|--------|-------------|
+| 0 | ESTOP | All operations | **NO** |
+| 1 | DOOR_CLOSED | START_RUN | Yes |
+| 2 | HMI_LIVE | START_RUN, continue RUN | Yes |
+| 3 | PID1_ONLINE | START_RUN (if REQUIRED) | Yes |
+| 4 | PID2_ONLINE | START_RUN (if REQUIRED) | Yes |
+| 5 | PID3_ONLINE | START_RUN (if REQUIRED) | Yes |
+| 6 | PID1_NO_PROBE_ERR | START_RUN (if REQUIRED) | Yes |
+| 7 | PID2_NO_PROBE_ERR | START_RUN (if REQUIRED) | Yes |
+| 8 | PID3_NO_PROBE_ERR | START_RUN (if REQUIRED) | Yes |
+
+### Probe Error Detection
+
+Probe errors are detected from PID PV values:
+- **HHHH (Over-range)**: PV >= 500.0°C (5000 x10) - Any PID
+- **LLLL (Under-range)**: PV <= -300.0°C (-3000 x10) - PID2 and PID3 only (not LN2)
+
+The LN2 controller (PID 1) legitimately reads very low temperatures, so under-range is not an error for it.
+
+---
+
+## Part 3: New BLE Commands
+
+### CMD_GET_CAPABILITIES (0x0070)
+
+Get current capability levels for all subsystems.
+
+**Request:** Empty payload
+
+**ACK Optional Data (8 bytes):**
+```
+Offset  Size  Field       Description
+------  ----  ----------  ---------------------------
+0       1     pid1_cap    PID1 capability (0-2)
+1       1     pid2_cap    PID2 capability
+2       1     pid3_cap    PID3 capability
+3       1     di1_cap     E-Stop (always 2=REQUIRED)
+4       1     di2_cap     Door sensor capability
+5       1     di3_cap     LN2 sensor capability
+6       1     di4_cap     Motor fault capability
+7       1     reserved    Reserved
 ```
 
-### Why Alarms Appear Briefly Then Disappear
+### CMD_SET_CAPABILITY (0x0071)
 
-**This is correct MCU behavior.** The MCU reports truthfully:
+Set capability level for a subsystem. Persists to NVS.
 
-1. **Brief PID offline:** RS-485 poll failed → `PID1_FAULT` set → Next poll succeeds → `PID1_FAULT` cleared
-2. **Session expiry race:** Keepalive arrives just as timer expires → `HMI_NOT_LIVE` set briefly → Session revives → Cleared
-
-The MCU doesn't latch alarms because it doesn't know if this is a "real" problem or a transient glitch.
-
-### Required App-Side Implementation
-
-**The app MUST implement alarm history tracking:**
-
-```swift
-// Pseudocode - Alarm History Manager
-struct AlarmHistoryEntry {
-    let timestamp: Date
-    let alarmBit: UInt32
-    let wasAsserted: Bool  // true = alarm set, false = alarm cleared
-}
-
-class AlarmHistoryManager {
-    private var history: [AlarmHistoryEntry] = []
-    private var previousAlarmBits: UInt32 = 0
-    private var unacknowledgedAlarms: Set<UInt32> = []
-
-    func processTelemetry(_ telemetry: TelemetryPacket) {
-        let current = telemetry.alarmBits
-        let changed = current ^ previousAlarmBits
-
-        for bit in 0..<32 {
-            let mask: UInt32 = 1 << bit
-            if (changed & mask) != 0 {
-                let isNowSet = (current & mask) != 0
-
-                // Record the transition
-                history.append(AlarmHistoryEntry(
-                    timestamp: Date(),
-                    alarmBit: mask,
-                    wasAsserted: isNowSet
-                ))
-
-                // Track unacknowledged alarms
-                if isNowSet {
-                    unacknowledgedAlarms.insert(mask)
-                }
-            }
-        }
-        previousAlarmBits = current
-    }
-
-    func acknowledgeAlarm(_ alarmBit: UInt32) {
-        unacknowledgedAlarms.remove(alarmBit)
-    }
-
-    func hasUnacknowledgedAlarms() -> Bool {
-        return !unacknowledgedAlarms.isEmpty
-    }
-}
+**Request Payload (2 bytes):**
+```
+Offset  Size  Field           Description
+------  ----  -------------   ---------------------------
+0       1     subsystem_id    Subsystem ID (0-6)
+1       1     capability      Capability level (0-2)
 ```
 
-### Recommended Alarm UI Pattern
+**ACK:** Standard ACK. Returns `INVALID_ARGS` if trying to change E-Stop (ID 3).
 
-1. **Active Alarms Banner:**
-   - Show currently active alarms from `alarm_bits`
-   - Red indicator while any bit is set
-   - Clears automatically when conditions resolve
+### CMD_GET_SAFETY_GATES (0x0072)
 
-2. **Alarm History Log:**
-   - Record every transition (set/clear)
-   - Include timestamp
-   - Keep for session or persist to storage
-   - Allow user to view past events
+Get current safety gate states (enabled/bypassed) and status (passing/blocking).
 
-3. **Unacknowledged Alarms Badge:**
-   - Even if `alarm_bits` is now 0, show that an alarm occurred
-   - Require user to explicitly dismiss
-   - Example: "PID1_FAULT occurred at 10:23:45 (now cleared)"
+**Request:** Empty payload
 
-### Events vs Telemetry for Alarms
+**ACK Optional Data (4 bytes):**
+```
+Offset  Size  Field         Description
+------  ----  -----------   ---------------------------
+0       2     gate_enable   Bitmask: 1=enabled, 0=bypassed (LE u16)
+2       2     gate_status   Bitmask: 1=passing, 0=blocking (LE u16)
+```
 
-| Mechanism | Use Case | Reliability |
-|-----------|----------|-------------|
-| `alarm_bits` in telemetry | Continuous monitoring (primary) | High (10 Hz) |
-| Events | Immediate UI triggers (supplementary) | Medium (may miss if BLE busy) |
+Bit positions correspond to Gate IDs (0-8).
 
-**Recommendation:** Use telemetry `alarm_bits` as **primary source**. Events supplement but don't rely on them for complete history.
+### CMD_SET_SAFETY_GATE (0x0073)
 
----
+Enable or bypass a safety gate. Does NOT persist to NVS.
 
-## Previous Versions
+**Request Payload (2 bytes):**
+```
+Offset  Size  Field     Description
+------  ----  --------  ---------------------------
+0       1     gate_id   Gate ID (0-8)
+1       1     enabled   1=enable gate, 0=bypass gate
+```
 
-### v0.3.3: Lazy Polling Configuration
-- Added `CMD_SET_IDLE_TIMEOUT (0x0040)` and `CMD_GET_IDLE_TIMEOUT (0x0041)`
-- NVS persistence of idle timeout setting
-- Activity tracking (any BLE command resets timer)
-
-### v0.3.2: Generic Register Commands
-- `CMD_READ_REGISTERS (0x0030)` - Read 1-16 consecutive Modbus registers
-- `CMD_WRITE_REGISTER (0x0031)` - Write single register with verification
-
-### v0.3.1: PID Polling Fixes
-- MODE register now polled alongside PV/SV
-- Read-after-write verification for SET_SV and SET_MODE
+**ACK:** Standard ACK. Returns `INVALID_ARGS` for gate 0 (E-Stop cannot be bypassed).
 
 ---
 
-## Reference Documentation (Absolute Paths)
+## Part 4: Extended alarm_bits (u32)
 
-| Document | Path |
-|----------|------|
-| **This Handoff** | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/docs/APP_AGENT_HANDOFF.md` |
-| Wire Protocol Types | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/wire_protocol/include/wire_protocol.h` |
-| PID Controller Header | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/pid_controller/include/pid_controller.h` |
-| PID Controller Impl | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/pid_controller/pid_controller.c` |
-| Telemetry | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/telemetry/telemetry.c` |
-| BLE GATT | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/ble_gatt/ble_gatt.c` |
-| Machine State | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/machine_state/machine_state.c` |
-| Session Manager | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/session_mgr/session_mgr.c` |
-| Firmware Version | `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/version/include/fw_version.h` |
+New bits added in v0.4.0:
 
----
+| Bit | Name | Meaning when set |
+|----:|------|------------------|
+| 9 | `GATE_DOOR_BYPASSED` | Door gate is bypassed |
+| 10 | `GATE_HMI_BYPASSED` | HMI liveness gate is bypassed |
+| 11 | `GATE_PID_BYPASSED` | Any PID gate is bypassed |
+| 12 | `PID1_PROBE_ERROR` | PID1 has probe error (HHHH/LLLL) |
+| 13 | `PID2_PROBE_ERROR` | PID2 has probe error |
+| 14 | `PID3_PROBE_ERROR` | PID3 has probe error |
 
-## Testing Checklist
-
-### Lazy Polling
-- [ ] App reads `idle_timeout_min` from telemetry on connect
-- [ ] App updates local setting from MCU value
-- [ ] App sends `CMD_SET_IDLE_TIMEOUT` when user changes setting
-- [ ] MCU persists setting to NVS (survives reboot)
-- [ ] `lazy_poll_active` reflects current polling mode in UI
-
-### Alarm History
-- [ ] App records alarm transitions from telemetry
-- [ ] Brief alarms (100-500ms) are captured in history
-- [ ] User can view alarm history log
-- [ ] Unacknowledged alarms persist until dismissed
-- [ ] Current `alarm_bits` drives active alarm indicator
+**App should:**
+- Display warning indicators when gate bypass bits are set
+- Show probe error indicators for each PID
+- Consider adding a "Safety Gates Bypassed" banner when bits 9-11 are set
 
 ---
 
-## Command Quick Reference
+## Part 5: App Integration Tasks
 
-| Command | ID | Payload | ACK Data |
-|---------|-----|---------|----------|
-| SET_IDLE_TIMEOUT | 0x0040 | `timeout_minutes (u8)` | None |
-| GET_IDLE_TIMEOUT | 0x0041 | None | `timeout_minutes (u8)` |
-| SET_SV | 0x0020 | `ctrl_id, sv_x10` | None |
-| SET_MODE | 0x0021 | `ctrl_id, mode` | None |
-| READ_REGISTERS | 0x0030 | `ctrl_id, addr, count` | `ctrl_id, addr, count, values[]` |
-| WRITE_REGISTER | 0x0031 | `ctrl_id, addr, value` | `ctrl_id, addr, verified_value` |
+### Required Updates
+
+1. **Add new command IDs to BleConstants.kt:**
+   ```kotlin
+   const val CMD_GET_CAPABILITIES = 0x0070
+   const val CMD_SET_CAPABILITY = 0x0071
+   const val CMD_GET_SAFETY_GATES = 0x0072
+   const val CMD_SET_SAFETY_GATE = 0x0073
+   ```
+
+2. **Update alarm_bits parsing** to handle new bits 9-14
+
+3. **Fix relay channel constants:**
+   ```kotlin
+   const val LIGHT_RELAY_CHANNEL = 7        // Was 6
+   const val DOOR_LOCK_RELAY_CHANNEL = 6    // Was 5
+   ```
+
+4. **Add Service Mode settings panel** for capability configuration
+
+5. **Add safety gate status display** in diagnostics/service view
+
+### Deep Links for Testing
+
+```bash
+# Navigate to Service Mode
+adb shell am start -a android.intent.action.VIEW -d "shaker://service" com.shakercontrol.app.debug
+
+# Navigate to Registers for each PID
+adb shell am start -a android.intent.action.VIEW -d "shaker://registers/1" com.shakercontrol.app.debug
+adb shell am start -a android.intent.action.VIEW -d "shaker://registers/2" com.shakercontrol.app.debug
+adb shell am start -a android.intent.action.VIEW -d "shaker://registers/3" com.shakercontrol.app.debug
+
+# Navigate to Settings
+adb shell am start -a android.intent.action.VIEW -d "shaker://settings" com.shakercontrol.app.debug
+```
+
+### Testing Checklist
+
+- [ ] Verify relay channel constants match hardware (Light=CH7, Door=CH6, LN2=CH5)
+- [ ] Verify DI visualization matches hardware states
+- [ ] Test CMD_GET_CAPABILITIES returns correct values
+- [ ] Test CMD_SET_CAPABILITY persists across reboot
+- [ ] Test CMD_SET_CAPABILITY rejects changes to E-Stop (ID 3)
+- [ ] Test CMD_GET_SAFETY_GATES returns gate enable and status bitmasks
+- [ ] Test CMD_SET_SAFETY_GATE enables/bypasses gates (except E-Stop)
+- [ ] Verify alarm_bits shows probe errors when PV is HHHH/LLLL
+- [ ] Verify alarm_bits shows gate bypass indicators
+- [ ] UI displays warning when safety gates are bypassed
+
+---
+
+## Previous Features (Already Implemented)
+
+### Lazy Polling (v0.3.7+)
+- `CMD_SET_LAZY_POLL (0x0060)` and `CMD_GET_LAZY_POLL (0x0061)`
+- Telemetry includes `lazy_poll_active` and `idle_timeout_min` in run state
+
+### Generic Register Commands (v0.3.2+)
+- `CMD_READ_REGISTERS (0x0030)` and `CMD_WRITE_REGISTER (0x0031)`
+- Read 1-16 consecutive Modbus registers or write single register
+
+### Session Management
+- `CMD_OPEN_SESSION (0x0100)`, `CMD_KEEPALIVE (0x0101)`
+- Session lease with automatic expiry
+
+---
+
+## Reference Paths
+
+| File | Description |
+|------|-------------|
+| `firmware/components/safety_gate/` | Safety gate implementation |
+| `firmware/components/wire_protocol/include/wire_protocol.h` | Wire protocol types and commands |
+| `firmware/components/ble_gatt/ble_gatt.c` | BLE command handlers |
+| `firmware/components/machine_state/include/machine_state.h` | DI/RO channel defines |
+| `docs/90-command-catalog.md` | Complete protocol reference |
+| `docs/SAFETY_GATE_FRAMEWORK.md` | Detailed safety gate design document |
 
 ---
 
@@ -261,5 +289,8 @@ class AlarmHistoryManager {
 1. **All multi-byte values are little-endian**
 2. **Temperature values are scaled ×10** (e.g., -150.0°C = -1500 as i16)
 3. **Controller IDs are 1-based** (1, 2, or 3)
-4. **MCU is source of truth** for idle timeout - read from telemetry, write to change
-5. **Alarm bits are real-time state** - app must track history separately
+4. **Relay/DI channels are 1-based** in commands (1-8)
+5. **Relay/DI bits are 0-based** in telemetry bitmasks (bit 0 = channel 1)
+6. **E-Stop gate can NEVER be bypassed** - MCU will reject the command
+7. **Capability levels persist to NVS** - survive reboots
+8. **Gate bypasses do NOT persist** - reset to enabled on reboot for safety

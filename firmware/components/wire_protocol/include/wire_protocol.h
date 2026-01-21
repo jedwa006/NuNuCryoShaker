@@ -64,6 +64,8 @@ typedef enum {
     CMD_KEEPALIVE               = 0x0101,
     CMD_START_RUN               = 0x0102,
     CMD_STOP_RUN                = 0x0103,
+    CMD_PAUSE_RUN               = 0x0104,   /* Pause run (door unlock, motor stop) */
+    CMD_RESUME_RUN              = 0x0105,   /* Resume from pause */
 
     /* Service Mode (0x0110 - 0x011F) */
     CMD_ENABLE_SERVICE_MODE     = 0x0110,
@@ -100,6 +102,8 @@ typedef enum {
     EVENT_RUN_ABORTED           = 0x1202,
     EVENT_PRECOOL_COMPLETE      = 0x1203,
     EVENT_STATE_CHANGED         = 0x1204,
+    EVENT_RUN_PAUSED            = 0x1205,
+    EVENT_RUN_RESUMED           = 0x1206,
     EVENT_RS485_DEVICE_ONLINE   = 0x1300,
     EVENT_RS485_DEVICE_OFFLINE  = 0x1301,
     EVENT_ALARM_LATCHED         = 0x1400,

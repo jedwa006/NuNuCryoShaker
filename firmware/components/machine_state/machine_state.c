@@ -43,6 +43,11 @@ static uint32_t s_run_duration_ms = 0;
 static int16_t s_target_temp_x10 = 0;
 static int64_t s_state_enter_us = 0;
 
+/* Pause state tracking */
+static pause_mode_t s_pause_mode = PAUSE_MODE_KEEP_COOLING;
+static machine_state_t s_pre_pause_state = MACHINE_STATE_IDLE;  /* State before pause (RUNNING or PRECOOL) */
+static int64_t s_pause_time_us = 0;  /* Time at which pause started (for run timer adjustment) */
+
 /* Digital input state (cached from last read) */
 static uint16_t s_di_bits = 0xFF;   /* All HIGH = safe default */
 
@@ -68,6 +73,7 @@ static const char *state_names[] = {
     [MACHINE_STATE_E_STOP]   = "E_STOP",
     [MACHINE_STATE_FAULT]    = "FAULT",
     [MACHINE_STATE_SERVICE]  = "SERVICE",
+    [MACHINE_STATE_PAUSED]   = "PAUSED",
 };
 
 /* PID controller address for chamber temperature */
@@ -271,9 +277,10 @@ esp_err_t machine_state_stop_run(uint32_t session_id, stop_mode_t mode)
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 
-    /* Check if we're in a stoppable state */
+    /* Check if we're in a stoppable state (including PAUSED) */
     if (s_state != MACHINE_STATE_PRECOOL &&
-        s_state != MACHINE_STATE_RUNNING) {
+        s_state != MACHINE_STATE_RUNNING &&
+        s_state != MACHINE_STATE_PAUSED) {
         ESP_LOGW(TAG, "STOP_RUN ignored: state=%s", machine_state_to_str(s_state));
         xSemaphoreGive(s_mutex);
         return ESP_ERR_INVALID_STATE;
@@ -288,6 +295,94 @@ esp_err_t machine_state_stop_run(uint32_t session_id, stop_mode_t mode)
         /* Normal stop - go through STOPPING phase */
         transition_to(MACHINE_STATE_STOPPING);
     }
+
+    xSemaphoreGive(s_mutex);
+    return ESP_OK;
+}
+
+esp_err_t machine_state_pause_run(uint32_t session_id, pause_mode_t mode)
+{
+    /* Validate session */
+    if (!session_mgr_is_valid(session_id)) {
+        ESP_LOGW(TAG, "PAUSE_RUN rejected: invalid session");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+
+    /* Check if we're in a pausable state */
+    if (s_state != MACHINE_STATE_PRECOOL && s_state != MACHINE_STATE_RUNNING) {
+        ESP_LOGW(TAG, "PAUSE_RUN rejected: state=%s", machine_state_to_str(s_state));
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Store pause state info */
+    s_pause_mode = mode;
+    s_pre_pause_state = s_state;
+    s_pause_time_us = esp_timer_get_time();
+
+    ESP_LOGI(TAG, "Pausing run: mode=%s from_state=%s",
+             mode == PAUSE_MODE_KEEP_COOLING ? "KEEP_COOLING" : "STOP_COOLING",
+             machine_state_to_str(s_pre_pause_state));
+
+    /* Set LN2 valve based on pause mode BEFORE transition
+     * (transition_to will set other outputs) */
+    if (mode == PAUSE_MODE_STOP_COOLING) {
+        relay_ctrl_set(RO_LN2_VALVE, RELAY_STATE_OFF);
+    }
+    /* If KEEP_COOLING, leave LN2 valve in current state (already on from PRECOOL/RUNNING) */
+
+    transition_to(MACHINE_STATE_PAUSED);
+
+    xSemaphoreGive(s_mutex);
+    return ESP_OK;
+}
+
+esp_err_t machine_state_resume_run(uint32_t session_id)
+{
+    /* Validate session */
+    if (!session_mgr_is_valid(session_id)) {
+        ESP_LOGW(TAG, "RESUME_RUN rejected: invalid session");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+
+    /* Check if we're in PAUSED state */
+    if (s_state != MACHINE_STATE_PAUSED) {
+        ESP_LOGW(TAG, "RESUME_RUN rejected: state=%s", machine_state_to_str(s_state));
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Check that door is closed before resuming */
+    if (check_door_open()) {
+        ESP_LOGW(TAG, "RESUME_RUN rejected: door still open");
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_NOT_ALLOWED;
+    }
+
+    /* Check E-stop is clear */
+    if (check_estop_active()) {
+        ESP_LOGW(TAG, "RESUME_RUN rejected: E-stop active");
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_NOT_ALLOWED;
+    }
+
+    /* Check HMI is live */
+    if (!session_mgr_is_live()) {
+        ESP_LOGW(TAG, "RESUME_RUN rejected: HMI not live");
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_NOT_ALLOWED;
+    }
+
+    ESP_LOGI(TAG, "Resuming run: returning to %s",
+             machine_state_to_str(s_pre_pause_state));
+
+    /* Always go through PRECOOL to re-establish temperature before resuming
+     * This ensures the chamber re-cools to target before motor starts */
+    transition_to(MACHINE_STATE_PRECOOL);
 
     xSemaphoreGive(s_mutex);
     return ESP_OK;
@@ -505,6 +600,17 @@ static void transition_to(machine_state_t new_state)
             /* All relays available for manual control */
             break;
 
+        case MACHINE_STATE_PAUSED:
+            /* Stop motor, heaters off, unlock door for inspection */
+            relay_ctrl_set(RO_MOTOR_START, RELAY_STATE_OFF);
+            relay_ctrl_set(RO_MAIN_CONTACTOR, RELAY_STATE_OFF);
+            relay_ctrl_set(RO_HEATER_1, RELAY_STATE_OFF);
+            relay_ctrl_set(RO_HEATER_2, RELAY_STATE_OFF);
+            relay_ctrl_set(RO_DOOR_LOCK, RELAY_STATE_OFF);  /* Unlock door */
+            /* LN2 valve controlled by pause mode (set in pause_run function) */
+            telemetry_set_ro_bits(relay_ctrl_get_state());
+            break;
+
         default:
             break;
     }
@@ -532,9 +638,18 @@ static void transition_to(machine_state_t new_state)
                (old_state == MACHINE_STATE_STOPPING || old_state == MACHINE_STATE_RUNNING)) {
         emit_event(EVENT_RUN_STOPPED, EVENT_SEVERITY_INFO, NULL, 0);
     } else if (new_state == MACHINE_STATE_FAULT || new_state == MACHINE_STATE_E_STOP) {
-        if (old_state == MACHINE_STATE_RUNNING || old_state == MACHINE_STATE_PRECOOL) {
+        if (old_state == MACHINE_STATE_RUNNING || old_state == MACHINE_STATE_PRECOOL ||
+            old_state == MACHINE_STATE_PAUSED) {
             emit_event(EVENT_RUN_ABORTED, EVENT_SEVERITY_ALARM, NULL, 0);
         }
+    }
+
+    /* Pause/resume events */
+    if (new_state == MACHINE_STATE_PAUSED) {
+        emit_event(EVENT_RUN_PAUSED, EVENT_SEVERITY_INFO, NULL, 0);
+    } else if (old_state == MACHINE_STATE_PAUSED &&
+               (new_state == MACHINE_STATE_PRECOOL || new_state == MACHINE_STATE_RUNNING)) {
+        emit_event(EVENT_RUN_RESUMED, EVENT_SEVERITY_INFO, NULL, 0);
     }
 }
 
@@ -644,12 +759,14 @@ static void state_task(void *arg)
             transition_to(MACHINE_STATE_E_STOP);
         }
 
-        /* Check for motor fault - triggers FAULT from most states */
+        /* Check for motor fault - triggers FAULT from most states
+         * (not from IDLE, SERVICE, PAUSED, or already in E_STOP/FAULT) */
         if (check_motor_fault() &&
             s_state != MACHINE_STATE_E_STOP &&
             s_state != MACHINE_STATE_FAULT &&
             s_state != MACHINE_STATE_IDLE &&
-            s_state != MACHINE_STATE_SERVICE) {
+            s_state != MACHINE_STATE_SERVICE &&
+            s_state != MACHINE_STATE_PAUSED) {
             ESP_LOGE(TAG, "Motor fault detected!");
             transition_to(MACHINE_STATE_FAULT);
         }

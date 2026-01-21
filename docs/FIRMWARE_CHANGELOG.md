@@ -1,6 +1,71 @@
 # Firmware Changelog
 
-## [Unreleased] - 2026-01-19
+## [v0.4.0] - 2026-01-20
+
+### Added
+- **safety_gate component**: Configurable safety gate framework for operational safety
+  - Subsystem capability levels: NOT_PRESENT (0), OPTIONAL (1), REQUIRED (2)
+  - 9 safety gates: E-Stop, Door Closed, HMI Live, PID1/2/3 Online, PID1/2/3 No Probe Error
+  - E-Stop gate (ID 0) can NEVER be bypassed - hardware safety requirement
+  - Gate bypasses reset on reboot for safety; capability levels persist via NVS
+  - Probe error detection: HHHH (≥500°C) and LLLL (≤-300°C, except PID1/LN2)
+  - Integrated with machine_state for START_RUN blocking and run fault detection
+
+- **BLE Commands for Safety Gate**:
+  - `CMD_GET_CAPABILITIES (0x0070)` - Get subsystem capability levels (8 bytes)
+  - `CMD_SET_CAPABILITY (0x0071)` - Set capability level for a subsystem (persists to NVS)
+  - `CMD_GET_SAFETY_GATES (0x0072)` - Get gate enable/status bitmasks (4 bytes)
+  - `CMD_SET_SAFETY_GATE (0x0073)` - Enable/bypass a safety gate (rejects E-Stop bypass)
+
+- **Extended alarm_bits (bits 9-14)**:
+  - bit 9: `GATE_DOOR_BYPASSED` - Door gate is bypassed
+  - bit 10: `GATE_HMI_BYPASSED` - HMI gate is bypassed
+  - bit 11: `GATE_PID_BYPASSED` - Any PID gate is bypassed
+  - bit 12: `PID1_PROBE_ERROR` - PID1 has probe error
+  - bit 13: `PID2_PROBE_ERROR` - PID2 has probe error
+  - bit 14: `PID3_PROBE_ERROR` - PID3 has probe error
+
+### Changed
+- **telemetry.c**: Added `update_safety_gate_alarm_bits()` to report probe errors and gate bypasses
+- **recovery_factory CMakeLists.txt**: Excluded `safety_gate` and `machine_state` from recovery build
+- **machine_state**: Now checks safety gates before allowing START_RUN
+
+### Technical Notes
+- Subsystem IDs: PID1(0), PID2(1), PID3(2), DI_ESTOP(3), DI_DOOR(4), DI_LN2(5), DI_MOTOR(6)
+- Gate IDs: ESTOP(0), DOOR_CLOSED(1), HMI_LIVE(2), PID1_ONLINE(3), PID2_ONLINE(4), PID3_ONLINE(5), PID1_NO_PROBE_ERR(6), PID2_NO_PROBE_ERR(7), PID3_NO_PROBE_ERR(8)
+- NVS namespace "safety" stores capability levels (keys: `cap_pid1`, `cap_pid2`, etc.)
+- Default capabilities: E-Stop=REQUIRED (immutable), Door=REQUIRED, LN2=OPTIONAL, Motor=NOT_PRESENT
+
+---
+
+## [v0.3.x] - 2026-01-19 to 2026-01-20
+
+### v0.3.10 - Relay Mapping Verification
+- Verified relay channel mapping (CH1-CH7)
+- Documented relay functions in machine_state.h
+
+### v0.3.8 - Telemetry Serialization Fix
+- Fixed `wire_build_telemetry_ext()` to serialize all 16 bytes of run state
+- `lazy_poll_active` and `idle_timeout_min` now correctly included in telemetry
+
+### v0.3.7 - KEEPALIVE Activity Fix
+- Fixed KEEPALIVE resetting activity timer (prevented lazy polling activation)
+
+### v0.3.4 - Lazy Polling Telemetry
+- Added `lazy_poll_active` and `idle_timeout_min` to telemetry run state struct
+- NVS persistence of idle timeout setting
+
+### v0.3.2 - Generic Register Commands
+- `CMD_READ_REGISTERS (0x0030)` - Read 1-16 consecutive Modbus registers
+- `CMD_WRITE_REGISTER (0x0031)` - Write single register with verification
+
+### v0.3.1 - PID Polling Fixes
+- MODE register now polled alongside PV/SV
+- Read-after-write verification for SET_SV and SET_MODE
+
+---
+
+## [v0.2.0] - 2026-01-19
 
 ### Added
 - **status_led component**: New RGB LED status indicator using WS2812 on GPIO38

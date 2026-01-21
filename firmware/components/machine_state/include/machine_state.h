@@ -31,6 +31,7 @@ typedef enum {
     MACHINE_STATE_E_STOP    = 4,    /* Emergency stopped, outputs latched safe */
     MACHINE_STATE_FAULT     = 5,    /* Hardware fault detected, outputs safe */
     MACHINE_STATE_SERVICE   = 6,    /* Manual control mode (app-controlled outputs) */
+    MACHINE_STATE_PAUSED    = 7,    /* Run paused - door unlocked, motor stopped, cooling optional */
     MACHINE_STATE_MAX
 } machine_state_t;
 
@@ -46,6 +47,12 @@ typedef enum {
     STOP_MODE_NORMAL        = 0,    /* Graceful stop with thermal soak */
     STOP_MODE_ABORT         = 1,    /* Fast stop, maintain safe state */
 } stop_mode_t;
+
+/* Pause Modes (for PAUSE_RUN command) */
+typedef enum {
+    PAUSE_MODE_KEEP_COOLING = 0,    /* Keep LN2 valve open to maintain temp */
+    PAUSE_MODE_STOP_COOLING = 1,    /* Close LN2 valve (allow warm-up) */
+} pause_mode_t;
 
 /* Interlock bit definitions (for interlock_bits in telemetry) */
 #define INTERLOCK_BIT_ESTOP         (1 << 0)    /* E-stop active (DI1 LOW) */
@@ -146,6 +153,34 @@ esp_err_t machine_state_start_run(uint32_t session_id, run_mode_t mode,
  * @return ESP_OK if stop initiated
  */
 esp_err_t machine_state_stop_run(uint32_t session_id, stop_mode_t mode);
+
+/**
+ * @brief Pause current run
+ *
+ * Stops motor, unlocks door for inspection. Optionally keeps cooling active.
+ * Door interlock is bypassed during pause to allow inspection without fault.
+ * E-stop remains active and will still trigger E_STOP state.
+ *
+ * @param session_id Session ID for validation
+ * @param mode PAUSE_MODE_KEEP_COOLING or PAUSE_MODE_STOP_COOLING
+ * @return ESP_OK if pause initiated
+ *         ESP_ERR_INVALID_STATE if not in RUNNING or PRECOOL
+ */
+esp_err_t machine_state_pause_run(uint32_t session_id, pause_mode_t mode);
+
+/**
+ * @brief Resume from paused state
+ *
+ * Closes door, locks it, re-establishes cooling, then resumes run.
+ * Will re-check interlocks (except door during the resume sequence).
+ * Motor will restart after safety checks pass.
+ *
+ * @param session_id Session ID for validation
+ * @return ESP_OK if resume initiated
+ *         ESP_ERR_INVALID_STATE if not in PAUSED
+ *         ESP_ERR_NOT_ALLOWED if door still open or other interlocks active
+ */
+esp_err_t machine_state_resume_run(uint32_t session_id);
 
 /**
  * @brief Enter service mode (manual relay control)

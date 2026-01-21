@@ -324,6 +324,63 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
             break;
         }
 
+        case CMD_PAUSE_RUN: {
+            /* Payload: session_id (u32), pause_mode (u8) */
+            if (cmd_payload_len < 5) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint32_t session_id = cmd_payload[0] |
+                                  ((uint32_t)cmd_payload[1] << 8) |
+                                  ((uint32_t)cmd_payload[2] << 16) |
+                                  ((uint32_t)cmd_payload[3] << 24);
+            uint8_t pause_mode = cmd_payload[4];
+
+            ESP_LOGI(TAG, "PAUSE_RUN: session=0x%08lx mode=%u",
+                     (unsigned long)session_id, pause_mode);
+
+            esp_err_t err = machine_state_pause_run(session_id, pause_mode);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            }
+            break;
+        }
+
+        case CMD_RESUME_RUN: {
+            /* Payload: session_id (u32) */
+            if (cmd_payload_len < 4) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
+                break;
+            }
+
+            uint32_t session_id = cmd_payload[0] |
+                                  ((uint32_t)cmd_payload[1] << 8) |
+                                  ((uint32_t)cmd_payload[2] << 16) |
+                                  ((uint32_t)cmd_payload[3] << 24);
+
+            ESP_LOGI(TAG, "RESUME_RUN: session=0x%08lx", (unsigned long)session_id);
+
+            esp_err_t err = machine_state_resume_run(session_id);
+            if (err == ESP_OK) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_OK, 0, NULL, 0);
+            } else if (err == ESP_ERR_INVALID_ARG) {
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0001, NULL, 0);
+            } else if (err == ESP_ERR_NOT_ALLOWED) {
+                /* Return interlock info - door open or other safety issue */
+                uint8_t interlocks = machine_state_get_interlocks();
+                send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, 0x0002, &interlocks, 1);
+                ESP_LOGW(TAG, "RESUME_RUN rejected: interlocks=0x%02X", interlocks);
+            } else {
+                send_ack(header.seq, cmd_id, CMD_STATUS_NOT_READY, 0, NULL, 0);
+            }
+            break;
+        }
+
         case CMD_ENABLE_SERVICE_MODE: {
             if (cmd_payload_len < 4) {
                 send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0, NULL, 0);
@@ -560,6 +617,19 @@ static void handle_command(uint16_t conn_handle, const uint8_t *data, size_t len
             if (ctrl_id < 1 || ctrl_id > PID_MAX_CONTROLLERS) {
                 send_ack(header.seq, cmd_id, CMD_STATUS_INVALID_ARGS, 0x0005, NULL, 0);
                 break;
+            }
+
+            /* Safety gate check for enabling AUTO mode */
+            if (mode == CTRL_MODE_AUTO) {
+                int8_t blocking_gate = -1;
+                if (!safety_gate_can_enable_pid(ctrl_id, &blocking_gate)) {
+                    ESP_LOGW(TAG, "SET_MODE(AUTO) rejected: gate %d blocking for PID %u",
+                             blocking_gate, ctrl_id);
+                    /* Return which gate is blocking in the detail field */
+                    uint16_t detail = (blocking_gate >= 0) ? (uint16_t)blocking_gate : 0;
+                    send_ack(header.seq, cmd_id, CMD_STATUS_REJECTED_POLICY, detail, NULL, 0);
+                    break;
+                }
             }
 
             esp_err_t err = pid_controller_set_mode(ctrl_id, mode);
