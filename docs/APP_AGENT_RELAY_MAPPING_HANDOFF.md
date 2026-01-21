@@ -24,7 +24,7 @@ The MCU relay handling (`SET_RELAY` command) is fully working. However, the app 
 | CH6 | `RO_DOOR_LOCK` | Door lock solenoid | Safety interlock |
 | CH7 | `RO_CHAMBER_LIGHT` | Chamber lighting | User-controlled |
 
-Source: `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/machine_state/include/machine_state.h:64-70`
+Source: `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/machine_state/include/machine_state.h:64-70`
 
 ---
 
@@ -54,7 +54,7 @@ The MCU uses `CMD_SET_RELAY = 0x0001` (not 0x0030).
 
 Check `/Users/joshuaedwards/Downloads/claudeShakerControl/app/src/main/kotlin/com/shakercontrol/app/data/ble/BleConstants.kt` to ensure the app is using the correct command ID.
 
-Wire protocol reference: `/Users/joshuaedwards/Projects/NuNuCryoShaker/firmware/components/wire_protocol/include/wire_protocol.h:37`
+Wire protocol reference: `/Users/joshuaedwards/Documents/GitHub/NuNuCryoShaker/firmware/components/wire_protocol/include/wire_protocol.h:37`
 
 ---
 
