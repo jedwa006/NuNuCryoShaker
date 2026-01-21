@@ -1,5 +1,22 @@
 # Firmware Changelog
 
+## [v0.4.1] - 2026-01-20
+
+### Added
+- **PAUSED state**: New machine state for mid-run inspection
+  - `MACHINE_STATE_PAUSED (7)` - Motor stopped, door unlocked, cooling optional
+  - `CMD_PAUSE_RUN (0x0012)` - Pause with keep_cooling or stop_cooling mode
+  - `CMD_RESUME_RUN (0x0013)` - Resume from paused state with door interlock check
+  - Pause mode options: `PAUSE_MODE_KEEP_COOLING (0)`, `PAUSE_MODE_STOP_COOLING (1)`
+  - Door can be opened during pause for inspection without triggering fault
+
+### Technical Notes
+- Pause preserves pre-pause state (RUNNING or PRECOOL) for correct resume
+- Resume checks door is closed before re-engaging
+- Run timer paused during PAUSED state
+
+---
+
 ## [v0.4.0] - 2026-01-20
 
 ### Added
@@ -118,57 +135,37 @@
 
 ---
 
-## Git Best Practices for This Project
+## Development Reference
 
-### Branch Strategy
-- **main**: Stable, deployable code only. Protected branch.
-- **feature/\***: Feature development branches (e.g., `feature/firmware-led-and-components`)
-- **fix/\***: Bug fix branches
-- Always create PRs for merging to main; never push directly.
+For complete agent instructions, build commands, and development workflow, see:
+- **[CLAUDE.md](../CLAUDE.md)** - Agent instructions and quick reference
+- **[CONTRIBUTING.md](../CONTRIBUTING.md)** - Contribution guidelines
 
-### Commit Hygiene
-1. **Commit frequently**: Push after each logical unit of work completes
-2. **Atomic commits**: One feature/fix per commit when possible
-3. **Descriptive messages**: First line summarizes (50 chars), body explains why
-4. **Push regularly**: Don't accumulate local commits - push after each working state
-
-### Before Starting Work
+### Quick Build Reference (use wrapper script!)
 ```bash
-git fetch origin
-git status                    # Check for uncommitted changes
-git pull origin main          # If on main
+cd ~/Documents/GitHub/NuNuCryoShaker/firmware
+
+./tools/idf main build          # Build main_app
+./tools/idf main flash          # Flash to device
+./tools/idf main monitor        # Serial monitor
+./tools/idf main install-ota0   # Safe install to ota_0
+./tools/idf main fullclean      # Clean build directory
+./tools/idf main reconfigure    # Regenerate sdkconfig
+
+./tools/idf recovery build      # Build recovery app
 ```
 
-### During Development
+### Git Quick Reference
 ```bash
-# After each milestone:
+# Start feature
+git checkout main && git pull
+git checkout -b feature/my-feature
+
+# Commit and push
 git add -A
-git commit -m "Brief description of change"
-git push origin <branch-name>
+git commit -m "feat(component): Description"
+git push -u origin feature/my-feature
+
+# Create PR
+gh pr create --title "feat: Description" --body "Summary..."
 ```
-
-### Preventing Corruption
-- **Push often**: Remote serves as backup; local-only commits are vulnerable
-- **Avoid large binary files**: Use Git LFS if needed
-- **Clean builds**: Use `fullclean` before major operations to avoid stale artifacts
-- **Fresh clone test**: Periodically verify the repo builds from a fresh clone
-
-### Recovery from Corruption
-If you encounter pack file errors or "file truncated" messages:
-1. Clone fresh to a temporary location
-2. Copy uncommitted changes from corrupted repo
-3. Commit and push from the fresh clone
-4. Replace the corrupted local repo with the fresh one
-5. Preserve machine-specific files (e.g., `local.env`)
-
-### Pre-Session Checklist
-- [ ] `git status` - verify clean state
-- [ ] `git pull` - sync with remote
-- [ ] Check branch name matches intended work
-- [ ] Note current HEAD commit for reference
-
-### Post-Session Checklist
-- [ ] All changes committed with clear messages
-- [ ] Pushed to remote
-- [ ] Update changelog/roadmap if applicable
-- [ ] Create PR if feature is complete
