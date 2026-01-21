@@ -1,24 +1,91 @@
-# App Agent Handoff - Safety Gate Framework & Current MCU State
+# App Agent Handoff - Current MCU State
 
 **Date**: 2026-01-20
-**Firmware Version**: v0.4.0 (build 0x26012001)
-**Firmware Branch**: `main` (merged from `feature/pid-hmi-integration`)
+**Firmware Version**: v0.4.1
+**Firmware Branch**: `main`
 **Status**: MCU implementation complete, ready for app integration
 
 ---
 
 ## Summary
 
-Firmware v0.4.0 introduces the **Safety Gate Framework** - a configurable system for managing operational safety based on subsystem capabilities and runtime gate checks. This handoff covers:
+Current firmware features:
+- **v0.4.1**: PAUSED state for mid-run inspection
+- **v0.4.0**: Safety Gate Framework with configurable subsystem capabilities
+- **v0.3.x**: Lazy polling, generic register commands, session management
 
-1. **New safety gate BLE commands** (0x0070-0x0073)
-2. **Extended alarm_bits** (bits 9-14 for gate bypasses and probe errors)
-3. **Hardware I/O mappings** (DI and RO channels for UI visualization)
-4. **Integration tasks** for the app
+This handoff covers:
+1. **NEW: PAUSED state commands** (0x0012-0x0013)
+2. **Safety gate BLE commands** (0x0070-0x0073)
+3. **Extended alarm_bits** (bits 9-14 for gate bypasses and probe errors)
+4. **Hardware I/O mappings** (DI and RO channels for UI visualization)
+5. **Lazy polling** (0x0060-0x0061)
+6. **Integration tasks** for the app
 
 ---
 
-## Part 1: Hardware I/O Mappings
+## Part 1: PAUSED State (NEW in v0.4.1)
+
+### Overview
+
+The PAUSED state allows mid-run inspection without triggering a fault. When paused:
+- Motor stops
+- Door can be opened for inspection
+- Cooling can optionally continue (LN2 valve stays open)
+- Run timer is paused
+
+### Machine State
+
+`MACHINE_STATE_PAUSED = 7`
+
+### Commands
+
+#### CMD_PAUSE_RUN (0x0012)
+
+Pause the current run.
+
+**Request Payload (1 byte):**
+```
+Offset  Size  Field       Description
+------  ----  ----------  ---------------------------
+0       1     pause_mode  0=keep cooling, 1=stop cooling
+```
+
+**Pause Modes:**
+| Mode | Value | Behavior |
+|------|-------|----------|
+| PAUSE_MODE_KEEP_COOLING | 0 | LN2 valve stays open, maintains cold |
+| PAUSE_MODE_STOP_COOLING | 1 | LN2 valve closes, temperature rises |
+
+**ACK:** Standard ACK. Returns error if not in RUNNING or PRECOOL state.
+
+#### CMD_RESUME_RUN (0x0013)
+
+Resume from paused state.
+
+**Request:** Empty payload
+
+**ACK:** Standard ACK. Returns error if:
+- Not in PAUSED state
+- Door is open (interlock check)
+
+### App Integration
+
+1. Add command constants:
+   ```kotlin
+   const val CMD_PAUSE_RUN = 0x0012
+   const val CMD_RESUME_RUN = 0x0013
+   ```
+
+2. Add UI for pause/resume during RUNNING state
+
+3. Handle PAUSED state in telemetry (machine_state = 7)
+
+4. Show pause mode indicator (cooling active/stopped)
+
+---
+
+## Part 2: Hardware I/O Mappings
 
 ### Digital Inputs (di_bits)
 
@@ -61,7 +128,7 @@ const val LN2_VALVE_CHANNEL = 5          // CH5 = LN2 solenoid (chilldown)
 
 ---
 
-## Part 2: Safety Gate Framework (NEW in v0.4.0)
+## Part 3: Safety Gate Framework (v0.4.0)
 
 ### Concepts
 
@@ -113,7 +180,7 @@ The LN2 controller (PID 1) legitimately reads very low temperatures, so under-ra
 
 ---
 
-## Part 3: New BLE Commands
+## Part 4: Safety Gate BLE Commands
 
 ### CMD_GET_CAPABILITIES (0x0070)
 
@@ -181,7 +248,7 @@ Offset  Size  Field     Description
 
 ---
 
-## Part 4: Extended alarm_bits (u32)
+## Part 5: Extended alarm_bits (u32)
 
 New bits added in v0.4.0:
 
@@ -201,12 +268,69 @@ New bits added in v0.4.0:
 
 ---
 
-## Part 5: App Integration Tasks
+## Part 6: Lazy Polling (v0.3.7+)
+
+### Overview
+
+Reduce Modbus bus traffic and power consumption when no user is actively monitoring.
+
+**Polling Rates:**
+- Fast mode (default): 300ms per controller (~3.3 Hz)
+- Lazy mode: 2000ms per controller (~0.5 Hz)
+
+### Commands
+
+#### CMD_SET_LAZY_POLL (0x0060)
+
+**Request Payload (2 bytes):**
+```
+Offset  Size  Field        Description
+------  ----  -----------  ---------------------------
+0       1     enable       1=enable, 0=disable lazy polling
+1       1     timeout_min  Idle timeout in minutes (1-255)
+```
+
+**Behavior:**
+- Setting persists to NVS immediately
+- Activity timer resets on any BLE command **EXCEPT KEEPALIVE**
+- After timeout, polling rate reduces to lazy mode
+- Any user command returns to fast mode
+
+#### CMD_GET_LAZY_POLL (0x0061)
+
+**Request:** Empty payload
+
+**Response Payload (2 bytes):**
+```
+Offset  Size  Field        Description
+------  ----  -----------  ---------------------------
+0       1     enabled      1=enabled, 0=disabled
+1       1     timeout_min  Current timeout setting
+```
+
+### Telemetry Integration
+
+Run state telemetry (offset 9, 16 bytes) includes:
+- `lazy_poll_active` (offset 13): 1=lazy mode, 0=fast mode
+- `idle_timeout_min` (offset 14): Current timeout setting
+
+---
+
+## Part 7: App Integration Tasks
 
 ### Required Updates
 
 1. **Add new command IDs to BleConstants.kt:**
    ```kotlin
+   // PAUSED state (v0.4.1)
+   const val CMD_PAUSE_RUN = 0x0012
+   const val CMD_RESUME_RUN = 0x0013
+
+   // Lazy polling (v0.3.7+)
+   const val CMD_SET_LAZY_POLL = 0x0060
+   const val CMD_GET_LAZY_POLL = 0x0061
+
+   // Safety gates (v0.4.0)
    const val CMD_GET_CAPABILITIES = 0x0070
    const val CMD_SET_CAPABILITY = 0x0071
    const val CMD_GET_SAFETY_GATES = 0x0072
@@ -242,8 +366,18 @@ adb shell am start -a android.intent.action.VIEW -d "shaker://settings" com.shak
 
 ### Testing Checklist
 
+**PAUSED State (v0.4.1):**
+- [ ] Test CMD_PAUSE_RUN with keep_cooling mode
+- [ ] Test CMD_PAUSE_RUN with stop_cooling mode
+- [ ] Test CMD_RESUME_RUN when door is closed (should succeed)
+- [ ] Test CMD_RESUME_RUN when door is open (should fail with interlock error)
+- [ ] Verify machine_state=7 in telemetry when paused
+
+**Hardware I/O:**
 - [ ] Verify relay channel constants match hardware (Light=CH7, Door=CH6, LN2=CH5)
 - [ ] Verify DI visualization matches hardware states
+
+**Safety Gates (v0.4.0):**
 - [ ] Test CMD_GET_CAPABILITIES returns correct values
 - [ ] Test CMD_SET_CAPABILITY persists across reboot
 - [ ] Test CMD_SET_CAPABILITY rejects changes to E-Stop (ID 3)
@@ -253,13 +387,15 @@ adb shell am start -a android.intent.action.VIEW -d "shaker://settings" com.shak
 - [ ] Verify alarm_bits shows gate bypass indicators
 - [ ] UI displays warning when safety gates are bypassed
 
+**Lazy Polling (v0.3.7+):**
+- [ ] Test CMD_SET_LAZY_POLL enables/disables lazy mode
+- [ ] Verify lazy mode activates after idle timeout
+- [ ] Verify KEEPALIVE does not reset idle timer
+- [ ] Verify lazy_poll_active in telemetry
+
 ---
 
 ## Previous Features (Already Implemented)
-
-### Lazy Polling (v0.3.7+)
-- `CMD_SET_LAZY_POLL (0x0060)` and `CMD_GET_LAZY_POLL (0x0061)`
-- Telemetry includes `lazy_poll_active` and `idle_timeout_min` in run state
 
 ### Generic Register Commands (v0.3.2+)
 - `CMD_READ_REGISTERS (0x0030)` and `CMD_WRITE_REGISTER (0x0031)`
@@ -268,6 +404,19 @@ adb shell am start -a android.intent.action.VIEW -d "shaker://settings" com.shak
 ### Session Management
 - `CMD_OPEN_SESSION (0x0100)`, `CMD_KEEPALIVE (0x0101)`
 - Session lease with automatic expiry
+
+### Chilldown Mode
+
+The MCU supports `RUN_MODE_PRECOOL_ONLY = 2` for chilldown:
+1. Enters `PRECOOL` state
+2. Enables LN2 valve, heaters, door lock
+3. Waits for target temperature
+4. Stops in `IDLE` when complete (doesn't start motor)
+
+**For auto-start after chilldown**, the app can:
+1. Send `START_RUN` with `run_mode = PRECOOL_ONLY`
+2. Monitor telemetry for `machine_state = IDLE` (precool complete)
+3. Send another `START_RUN` with `run_mode = NORMAL`
 
 ---
 
